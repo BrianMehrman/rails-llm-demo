@@ -1,0 +1,5 @@
+apiVersion: v2
+name: redis
+description: Custom Redis chart for local development
+type: application
+version: 0.1.0

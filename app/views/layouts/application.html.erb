@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "Chatbot" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= yield :head %>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+  <body>
+    <nav>
+      <%= link_to "Chatbot", root_path, class: "brand" %>
+      <span class="spacer"></span>
+      <%= link_to "New Chat", new_chat_path, class: "btn-nav" %>
+    </nav>
+    <% flash.each do |_type, message| %>
+      <div class="flash"><%= message %></div>
+    <% end %>
+    <%= yield %>
+  </body>
+</html>

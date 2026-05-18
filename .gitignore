@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Bundler local config
+.bundle/config
+
+# Rails
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+/public/assets
+
+# Environment
+.env
+.env.*
+!/env.example
+
+# Credentials
+config/master.key
+/config/credentials/*.key
+
+# Logs
+*.log
+
+# docs
+docs/superpowers

@@ -1,0 +1,10 @@
+<div id="<%= dom_id(message) %>" class="message message--<%= message.role %>">
+  <span class="label"><%= message.role %></span>
+  <div class="bubble">
+    <% if message.status == "pending" %>
+      <em>Thinking…</em>
+    <% else %>
+      <%= message.content %>
+    <% end %>
+  </div>
+</div>

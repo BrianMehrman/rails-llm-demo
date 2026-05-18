@@ -1,0 +1,54 @@
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch("DB_HOST", "localhost") %>
+  port: <%= ENV.fetch("DB_PORT", 5432) %>
+  username: <%= ENV.fetch("DB_USERNAME", "postgres") %>
+  password: <%= ENV.fetch("DB_PASSWORD", "password") %>
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS", 5) %>
+  timeout: 5000
+  # pg 1.6.x uses async non-blocking connect by default, which negotiates SSL
+  # even for localhost. This crashes on arm64 macOS when forking (e.g. SolidQueue).
+  # SSL is not needed for local development.
+  sslmode: disable
+  # Prevent Kerberos/GSS credential cache lookup via XPC — breaks after fork() on arm64 macOS.
+  gssencmode: disable
+
+development:
+  primary:
+    <<: *default
+    database: chatbot_development
+  queue:
+    <<: *default
+    database: chatbot_development_queue
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: chatbot_development_cable
+    migrations_paths: db/cable_migrate
+
+test:
+  primary:
+    <<: *default
+    database: chatbot_test
+  queue:
+    <<: *default
+    database: chatbot_test_queue
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: chatbot_test_cable
+    migrations_paths: db/cable_migrate
+
+production:
+  primary:
+    <<: *default
+    database: chatbot_production
+  queue:
+    <<: *default
+    database: chatbot_production_queue
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: chatbot_production_cable
+    migrations_paths: db/cable_migrate

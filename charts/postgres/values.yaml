@@ -1,0 +1,23 @@
+image:
+  repository: postgres
+  tag: "16-alpine"
+
+# For local development only. Use a Kubernetes Secret for any shared environment.
+auth:
+  username: postgres
+  password: password
+  database: chatbot_development
+
+service:
+  type: NodePort
+  port: 5432
+  nodePort: 30432
+
+storage:
+  # Used when storage.pvc.enabled is false (default for local development)
+  hostPath: /tmp/postgres-rails/postgres
+  pvc:
+    enabled: false
+    # storageClass: "" means use the cluster's default StorageClass.
+    storageClass: ""
+    size: 1Gi

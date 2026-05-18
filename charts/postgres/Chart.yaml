@@ -1,0 +1,5 @@
+apiVersion: v2
+name: postgres
+description: Custom PostgreSQL chart for local development
+type: application
+version: 0.1.0
