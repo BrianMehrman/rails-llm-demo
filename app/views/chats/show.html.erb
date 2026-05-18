@@ -1,0 +1,21 @@
+<%= turbo_stream_from @chat %>
+
+<div class="chat-page">
+  <div class="chat-header">
+    <%= link_to "← All Chats", chats_path %>
+    <h1><%= @chat.title %></h1>
+  </div>
+
+  <div class="messages" id="messages">
+    <% @messages.each do |message| %>
+      <%= render "message", message: message %>
+    <% end %>
+  </div>
+
+  <div class="chat-input">
+    <%= form_with url: chat_messages_path(@chat) do |f| %>
+      <%= f.text_area :content, placeholder: "Type a message…", rows: 2 %>
+      <%= f.submit "Send" %>
+    <% end %>
+  </div>
+</div>

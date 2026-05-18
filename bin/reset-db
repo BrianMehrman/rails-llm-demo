@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Reset the development database.
+#
+# Use this when:
+#   - The Postgres pod fails with "initdb: error: directory exists but is not empty"
+#   - You want a clean schema + seed state during local development
+#   - After pulling migrations that conflict with your local data
+#
+# What it does:
+#   1. Removes the hostPath data directory used by the Kubernetes Postgres pod
+#      (/tmp/postgres-rails/postgres). Postgres refuses to init over a non-empty
+#      directory, so this clears the slate.
+#   2. Restarts the Postgres Helm release so the pod reinitialises cleanly.
+#   3. Runs db:reset (drop + create + schema:load + db:seed) via Rails.
+#
+# Prerequisites:
+#   - kubectl configured and pointing at your local cluster (Docker Desktop / k3d)
+#   - skaffold dev --port-forward already running (or you run it after this script)
+
+HOSTPATH="/tmp/postgres-rails/postgres"
+RELEASE="postgres"
+NAMESPACE="default"
+
+echo "==> Removing hostPath data at ${HOSTPATH}"
+rm -rf "${HOSTPATH}"
+
+echo "==> Restarting Postgres Helm release (${RELEASE})"
+kubectl rollout restart statefulset -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${RELEASE}" \
+  -n "${NAMESPACE}" 2>/dev/null || \
+kubectl rollout restart statefulset -l "app=${RELEASE}" \
+  -n "${NAMESPACE}" 2>/dev/null || \
+helm upgrade --install "${RELEASE}" charts/postgres \
+  --values charts/postgres/values.yaml \
+  --namespace "${NAMESPACE}" \
+  --wait
+
+echo "==> Waiting for Postgres to be ready..."
+kubectl wait pod \
+  -l "app.kubernetes.io/name=postgresql" \
+  -n "${NAMESPACE}" \
+  --for=condition=Ready \
+  --timeout=60s 2>/dev/null || \
+kubectl wait pod \
+  -l "app=${RELEASE}" \
+  -n "${NAMESPACE}" \
+  --for=condition=Ready \
+  --timeout=60s
+
+echo "==> Resetting Rails database (drop + create + schema:load + seed)"
+bin/rails db:reset
+
+echo ""
+echo "Done. Database is reset and ready."

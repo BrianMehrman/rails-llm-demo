@@ -1,0 +1,7 @@
+<div class="chat-item">
+  <%= link_to chat.title, chat %>
+  <span class="meta"><%= chat.messages.count %> messages</span>
+  <%= button_to "Delete", chat, method: :delete,
+      data: { turbo_confirm: "Delete this chat?" },
+      class: "btn btn-danger" %>
+</div>

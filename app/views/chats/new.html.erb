@@ -1,0 +1,12 @@
+<div class="page">
+  <div class="form-card">
+    <h1>New Chat</h1>
+    <%= form_with model: @chat do |f| %>
+      <div class="field">
+        <%= f.label :title, "Chat title" %>
+        <%= f.text_field :title, placeholder: "e.g. Research assistant", autofocus: true %>
+      </div>
+      <%= f.submit "Start Chat", class: "btn btn-primary" %>
+    <% end %>
+  </div>
+</div>
