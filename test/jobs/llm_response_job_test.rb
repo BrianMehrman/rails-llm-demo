@@ -8,7 +8,7 @@ class LlmResponseJobTest < ActiveJob::TestCase
     stub_request(:post, "http://localhost:11434/v1/chat/completions")
       .to_return(
         status: 200,
-        body: { choices: [{ message: { content: "Hi there!" } }] }.to_json,
+        body: { choices: [ { message: { content: "Hi there!" } } ] }.to_json,
         headers: { "Content-Type" => "application/json" }
       )
   end

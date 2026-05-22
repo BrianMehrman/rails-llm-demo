@@ -1,5 +1,5 @@
 class ChatsController < ApplicationController
-  before_action :set_chat, only: %i[show destroy]
+  before_action :set_chat, only: %i[ show destroy ]
 
   def index
     @chats = Chat.order(created_at: :desc)
@@ -34,6 +34,6 @@ class ChatsController < ApplicationController
   end
 
   def chat_params
-    params.expect(chat: [:title])
+    params.expect(chat: [ :title ])
   end
 end
