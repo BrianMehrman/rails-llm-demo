@@ -5,7 +5,7 @@ class ChatsControllerTest < ActionDispatch::IntegrationTest
     Chat.create!(title: "My Chat")
     get chats_url
     assert_response :success
-    assert_select "h1", "Chats"
+    assert_select "h1", "Your Chats"
   end
 
   test "GET /chats/:id shows messages" do

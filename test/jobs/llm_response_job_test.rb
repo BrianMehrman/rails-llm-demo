@@ -14,11 +14,10 @@ class LlmResponseJobTest < ActiveJob::TestCase
   end
 
   test "creates an assistant message with the LLM response" do
-    assert_difference("Message.count") do
-      LlmResponseJob.perform_now(@chat.id)
-    end
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
 
-    assistant_msg = @chat.messages.where(role: "assistant").last
+    assistant_msg.reload
     assert_equal "Hi there!", assistant_msg.content
     assert_equal "complete", assistant_msg.status
   end
@@ -27,18 +26,17 @@ class LlmResponseJobTest < ActiveJob::TestCase
     stub_request(:post, "http://localhost:11434/v1/chat/completions")
       .to_return(status: 500, body: "Server Error")
 
-    assert_difference("Message.count") do
-      LlmResponseJob.perform_now(@chat.id)
-    end
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
 
-    assistant_msg = @chat.messages.where(role: "assistant").last
+    assistant_msg.reload
     assert_equal "error", assistant_msg.status
   end
 
   test "only sends complete messages as LLM history" do
-    @chat.messages.create!(role: "assistant", content: "", status: "pending")
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
 
-    LlmResponseJob.perform_now(@chat.id)
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
 
     # The pending assistant message should not appear in history
     # WebMock will raise if the request body doesn't match expectations
