@@ -15,7 +15,7 @@ service:
 
 storage:
   # Used when storage.pvc.enabled is false (default for local development)
-  hostPath: /tmp/postgres-rails/postgres
+  hostPath: /tmp/rails-llm-demo/postgres
   pvc:
     enabled: false
     # storageClass: "" means use the cluster's default StorageClass.
