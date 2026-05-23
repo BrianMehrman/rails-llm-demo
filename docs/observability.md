@@ -20,7 +20,7 @@ Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scra
 
 | Service | URL | Purpose |
 |---|---|---|
-| Grafana | http://localhost:3000 | Unified dashboards |
+| Grafana | http://localhost:3001 | Unified dashboards |
 | Jaeger | http://localhost:16686 | Distributed trace viewer |
 | Prometheus | http://localhost:9090 | Metrics query |
 | Loki | http://localhost:3100 | Log aggregation |
@@ -39,6 +39,7 @@ Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scra
 | `OTEL_ENABLED` | `false` | Master switch — set `true` to activate |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector (Jaeger) |
 | `OTEL_SERVICE_NAME` | `rails-llm-demo` | Service name shown in traces |
+| `RAILS_METRICS_TARGET` | `host.docker.internal:3000` | Host/port Prometheus scrapes for `/metrics`. Default works with Docker Desktop (Mac/Windows). On Linux set to your host IP or container name. For Kubernetes, set to the service name and port. |
 
 ## Stop the stack
 

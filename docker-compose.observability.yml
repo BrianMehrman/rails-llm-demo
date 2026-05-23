@@ -11,11 +11,14 @@ services:
     image: prom/prometheus:v3.1.0
     ports:
       - "9090:9090"
+    environment:
+      - RAILS_METRICS_TARGET=${RAILS_METRICS_TARGET:-host.docker.internal:3000}
     volumes:
       - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+      - "--enable-feature=expand-env-vars"
 
   loki:
     image: grafana/loki:3.3.2
