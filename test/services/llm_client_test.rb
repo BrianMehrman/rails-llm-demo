@@ -6,13 +6,13 @@ class LlmClientTest < ActiveSupport::TestCase
       .to_return(
         status: 200,
         body: {
-          choices: [{ message: { content: "Hello from LLM" } }]
+          choices: [ { message: { content: "Hello from LLM" } } ]
         }.to_json,
         headers: { "Content-Type" => "application/json" }
       )
 
     client = LlmClient.new
-    result = client.chat([{ role: "user", content: "Hi" }])
+    result = client.chat([ { role: "user", content: "Hi" } ])
     assert_equal "Hello from LLM", result
   end
 
@@ -22,7 +22,7 @@ class LlmClientTest < ActiveSupport::TestCase
 
     client = LlmClient.new
     assert_raises(LlmClient::Error) do
-      client.chat([{ role: "user", content: "Hi" }])
+      client.chat([ { role: "user", content: "Hi" } ])
     end
   end
 
@@ -30,12 +30,12 @@ class LlmClientTest < ActiveSupport::TestCase
     stub_request(:post, "http://custom-llm-host:8080/v1/chat/completions")
       .to_return(
         status: 200,
-        body: { choices: [{ message: { content: "ok" } }] }.to_json,
+        body: { choices: [ { message: { content: "ok" } } ] }.to_json,
         headers: { "Content-Type" => "application/json" }
       )
 
     ClimateControl.modify(OPENAI_API_BASE: "http://custom-llm-host:8080/v1") do
-      result = LlmClient.new.chat([{ role: "user", content: "Hi" }])
+      result = LlmClient.new.chat([ { role: "user", content: "Hi" } ])
       assert_equal "ok", result
     end
   end

@@ -10,7 +10,7 @@ class LlmClient
     REGISTRY.histogram(
       :llm_request_duration_seconds,
       docstring: "LLM API request duration in seconds",
-      labels:    [:model, :status]
+      labels:    [ :model, :status ]
     )
   rescue Prometheus::Client::Registry::AlreadyRegisteredError
     REGISTRY.get(:llm_request_duration_seconds)
