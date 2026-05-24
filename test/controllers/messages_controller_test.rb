@@ -35,11 +35,11 @@ class MessagesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "POST enqueues LlmResponseJob with chat id and assistant message id" do
-    post chat_messages_url(@chat), params: { content: "Hello" }
+    assert_enqueued_with(job: LlmResponseJob) do
+      post chat_messages_url(@chat), params: { content: "Hello" }
+    end
 
-    job = ActiveJob::Base.queue_adapter.enqueued_jobs.last
-    chat_id, assistant_msg_id = job[:args]
-    assert_equal @chat.id, chat_id
-    assert_equal @chat.messages.where(role: "assistant").last.id, assistant_msg_id
+    assistant_msg_id = @chat.messages.where(role: "assistant").last.id
+    assert_enqueued_with(job: LlmResponseJob, args: [ @chat.id, assistant_msg_id ])
   end
 end
