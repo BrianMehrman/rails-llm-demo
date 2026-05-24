@@ -3,9 +3,8 @@ image:
   tag: "7-alpine"
 
 service:
-  type: NodePort
+  type: ClusterIP
   port: 6379
-  nodePort: 30379
 
 storage:
   # Used when storage.pvc.enabled is false (default for local development)

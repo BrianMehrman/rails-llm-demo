@@ -48,7 +48,7 @@ cp .env.example .env
 | Variable | Default | Purpose |
 |---|---|---|
 | `DB_HOST` | `localhost` | Postgres host |
-| `DB_PORT` | `30432` | Kubernetes NodePort for Postgres |
+| `DB_PORT` | `5432` | Postgres port (forwarded to localhost by skaffold) |
 | `REDIS_URL` | `redis://localhost:6379` | Redis URL |
 | `OPENAI_API_BASE` | `http://localhost:11434/v1` | LLM endpoint |
 | `LLM_MODEL` | `llama4` | Model name passed to the LLM |
