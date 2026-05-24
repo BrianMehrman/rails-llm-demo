@@ -190,6 +190,9 @@ docker compose -f docker-compose.observability.yml up -d
 
 ## Further Reading
 
+- `docs/architecture.md` — component diagram, request→job→broadcast sequence, data model ER, message status lifecycle
+- `docs/patterns.md` — how to add a model, controller action, background job, Turbo broadcast, or observability instrumentation
+- `docs/decisions.md` — architectural decisions and what NOT to change (SolidQueue, three-database setup, CSS conventions, Posts scaffold)
 - `docs/observability.md` — how to run the Jaeger + Prometheus + Loki + Grafana stack and what's instrumented
-- `docs/specs/` — architecture design documents and feature specs
+- `docs/specs/` — feature specs and design documents
 - `.env.example` — all supported environment variables with defaults
