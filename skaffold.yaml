@@ -15,3 +15,15 @@ deploy:
           - charts/redis/values.yaml
         namespace: default
         createNamespace: true
+
+portForward:
+  - resourceType: service
+    resourceName: postgres
+    namespace: default
+    port: 5432
+    localPort: 5432
+  - resourceType: service
+    resourceName: redis
+    namespace: default
+    port: 6379
+    localPort: 6379

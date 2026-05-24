@@ -3,13 +3,12 @@ image:
   tag: "7-alpine"
 
 service:
-  type: NodePort
+  type: ClusterIP
   port: 6379
-  nodePort: 30379
 
 storage:
   # Used when storage.pvc.enabled is false (default for local development)
-  hostPath: /tmp/postgres-rails/redis
+  hostPath: /tmp/rails-llm-demo/redis
   pvc:
     enabled: false
     # storageClass: "" means use the cluster's default StorageClass.

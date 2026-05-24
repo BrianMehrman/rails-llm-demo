@@ -9,13 +9,12 @@ auth:
   database: chatbot_development
 
 service:
-  type: NodePort
+  type: ClusterIP
   port: 5432
-  nodePort: 30432
 
 storage:
   # Used when storage.pvc.enabled is false (default for local development)
-  hostPath: /tmp/postgres-rails/postgres
+  hostPath: /tmp/rails-llm-demo/postgres
   pvc:
     enabled: false
     # storageClass: "" means use the cluster's default StorageClass.
