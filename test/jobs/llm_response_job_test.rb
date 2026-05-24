@@ -1,6 +1,8 @@
 require "test_helper"
 
 class LlmResponseJobTest < ActiveJob::TestCase
+  include ActionCable::TestHelper
+
   def setup
     @chat = Chat.create!(title: "Test")
     @chat.messages.create!(role: "user", content: "Hello", status: "complete")
@@ -44,6 +46,25 @@ class LlmResponseJobTest < ActiveJob::TestCase
     assert_requested(:post, "http://localhost:11434/v1/chat/completions") do |req|
       body = JSON.parse(req.body)
       body["messages"].none? { |m| m["content"] == "" }
+    end
+  end
+
+  test "broadcasts the assistant message after successful LLM response" do
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+
+    assert_turbo_stream_broadcasts(@chat, count: 1) do
+      LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
+    end
+  end
+
+  test "broadcasts the assistant message even when LLM fails" do
+    stub_request(:post, "http://localhost:11434/v1/chat/completions")
+      .to_return(status: 500, body: "Server Error")
+
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+
+    assert_turbo_stream_broadcasts(@chat, count: 1) do
+      LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
     end
   end
 end
