@@ -17,4 +17,14 @@ class ChatTest < ActiveSupport::TestCase
     assert_not chat.valid?
     assert_includes chat.errors[:title], "can't be blank"
   end
+
+  test "destroying a chat destroys its messages" do
+    chat = Chat.create!(title: "Doomed")
+    chat.messages.create!(role: "user", content: "Hi", status: "complete")
+    chat.messages.create!(role: "assistant", content: "", status: "pending")
+
+    assert_difference("Message.count", -2) do
+      chat.destroy!
+    end
+  end
 end
