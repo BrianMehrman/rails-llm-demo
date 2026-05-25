@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Fires via the WorktreeCreate hook. Writes a settings.local.json into the new
+# worktree so sub-agents have the Bash permissions they need without prompts.
+set -euo pipefail
+
+input=$(cat)
+worktree_path=$(echo "$input" | jq -r '.worktreePath // empty')
+
+if [ -z "$worktree_path" ]; then
+  echo "setup-worktree: no worktreePath in hook payload, skipping" >&2
+  exit 0
+fi
+
+claude_dir="$worktree_path/.claude"
+mkdir -p "$claude_dir"
+
+cat > "$claude_dir/settings.local.json" <<'JSON'
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(bundle *)",
+      "Bash(chmod *)",
+      "Bash(bin/rubocop *)",
+      "Bash(bin/rails test *)",
+      "Bash(bin/rails test:system *)",
+      "Bash(bin/brakeman *)",
+      "Bash(bin/bundler-audit)",
+      "Bash(bin/ci)"
+    ]
+  }
+}
+JSON
+
+echo "setup-worktree: wrote $claude_dir/settings.local.json" >&2
