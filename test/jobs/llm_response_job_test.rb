@@ -67,4 +67,91 @@ class LlmResponseJobTest < ActiveJob::TestCase
       LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
     end
   end
+
+  test "creates an OTEL span with correct attributes on success" do
+    finished_spans = []
+    exporter = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
+    OpenTelemetry::SDK.configure do |c|
+      c.add_span_processor(
+        OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(exporter)
+      )
+    end
+
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
+
+    finished_spans = exporter.finished_spans
+    job_span = finished_spans.find { |s| s.name == "llm_response_job.perform" }
+
+    assert_not_nil job_span, "Expected a span named 'llm_response_job.perform'"
+    assert_equal @chat.id.to_s, job_span.attributes["chat.id"]
+    assert_equal assistant_msg.id.to_s, job_span.attributes["message.id"]
+  end
+
+  test "sets OTEL span status to OK on success" do
+    exporter = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
+    OpenTelemetry::SDK.configure do |c|
+      c.add_span_processor(
+        OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(exporter)
+      )
+    end
+
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
+
+    job_span = exporter.finished_spans.find { |s| s.name == "llm_response_job.perform" }
+    assert_not_nil job_span
+    assert_equal OpenTelemetry::Trace::Status::OK, job_span.status.code
+  end
+
+  test "sets OTEL span status to ERROR when LLM fails" do
+    stub_request(:post, "http://localhost:11434/v1/chat/completions")
+      .to_return(status: 500, body: "Server Error")
+
+    exporter = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
+    OpenTelemetry::SDK.configure do |c|
+      c.add_span_processor(
+        OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(exporter)
+      )
+    end
+
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
+
+    job_span = exporter.finished_spans.find { |s| s.name == "llm_response_job.perform" }
+    assert_not_nil job_span
+    assert_equal OpenTelemetry::Trace::Status::ERROR, job_span.status.code
+  end
+
+  test "observes histogram on success with correct status label" do
+    registry = Prometheus::Client.registry
+    histogram = registry.get(:llm_job_duration_seconds)
+    assert_not_nil histogram, "Expected :llm_job_duration_seconds histogram to be registered"
+
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+
+    before_values = histogram.values.dup
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
+    after_values = histogram.values
+
+    success_key = { status: "success" }
+    assert after_values.key?(success_key), "Expected histogram to have a 'success' label entry"
+  end
+
+  test "observes histogram on error with correct status label" do
+    stub_request(:post, "http://localhost:11434/v1/chat/completions")
+      .to_return(status: 500, body: "Server Error")
+
+    registry = Prometheus::Client.registry
+    histogram = registry.get(:llm_job_duration_seconds)
+    assert_not_nil histogram, "Expected :llm_job_duration_seconds histogram to be registered"
+
+    assistant_msg = @chat.messages.create!(role: "assistant", content: "", status: "pending")
+
+    LlmResponseJob.perform_now(@chat.id, assistant_msg.id)
+    after_values = histogram.values
+
+    error_key = { status: "error" }
+    assert after_values.key?(error_key), "Expected histogram to have an 'error' label entry"
+  end
 end
