@@ -10,6 +10,50 @@ grafana:
     type: ClusterIP
     port: 80
 
+  grafana.ini:
+    server:
+      root_url: http://localhost:3001
+
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki-uid
+      url: http://loki.default.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+    - name: Jaeger
+      type: jaeger
+      uid: jaeger-uid
+      url: http://jaeger-query.default.svc.cluster.local:16686
+      access: proxy
+      isDefault: false
+
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+  dashboards:
+    default:
+      llm-overview:
+        configMapName: llm-overview-dashboard
+        datasource: Prometheus
+
 prometheus:
   service:
     type: ClusterIP
