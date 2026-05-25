@@ -4,6 +4,14 @@
 **Status:** Planned
 **Goal:** Produce a complete, compelling observability demo for a blog post targeting platform engineers, showing what you can see when running an LLM locally using a Rails app as the workload.
 
+## Architecture Decision
+
+The entire stack — Rails app, Postgres, Redis, and all observability tooling — runs in Kubernetes via Skaffold. The observability stack uses `kube-prometheus-stack` (Prometheus + Grafana), Loki, Jaeger, and Fluent Bit DaemonSet, all managed as Helm charts. Docker Compose is removed entirely.
+
+**Why:** Running the Rails app as a bare process while observability tools run in Docker containers is not a setup anyone uses in production. A platform engineer audience would immediately discount the example. A single Kubernetes-based stack is internally consistent and mirrors real deployment patterns.
+
+**`docker-compose.observability.yml` is removed** as part of Sprint 1.
+
 ---
 
 ## Context
@@ -18,10 +26,12 @@ The approach is **LLM story first**: build outward from the LLM call, adding sig
 
 | Area | What exists | What's missing |
 |------|-------------|----------------|
+| App deployment | Bare process (`bin/rails server`) | Dockerfile, Rails Helm chart, Skaffold build |
+| Observability stack | `docker-compose.observability.yml` (removed) | Helm charts: kube-prometheus-stack, Loki, Jaeger, Fluent Bit DaemonSet |
 | Tracing | `llm.chat` span with model, message count, response length | Token counts, job span, trace ID in logs |
 | Metrics | `llm_request_duration_seconds` histogram (model, status) | Token counters, job duration, error rates, throughput |
-| Logs | Fluent Bit ships Docker stdout to Loki | Structured JSON format, trace ID correlation |
-| Grafana | Stack running, no provisioned datasources or dashboards | Everything |
+| Logs | Nothing reaching Loki from Rails app | Structured JSON format, trace ID correlation, Fluent Bit collection |
+| Grafana | Stack not yet running in Kubernetes | Provisioned datasources and dashboards via Helm |
 | LLM response | Content parsed and returned | `usage.prompt_tokens`, `completion_tokens`, `total_tokens` discarded |
 | Traffic | None | Seed data, load generator, scenario script |
 
