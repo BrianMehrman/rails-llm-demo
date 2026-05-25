@@ -1,0 +1,26 @@
+image:
+  repository: rails-app
+  tag: latest
+  pullPolicy: Never
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# Environment variable overrides. The ConfigMap is always created from these values.
+# Sensitive values (SECRET_KEY_BASE) should be overridden via --set at deploy time
+# or a Kubernetes Secret; the placeholder below is safe for local dev only.
+env:
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: "true"
+  RAILS_SERVE_STATIC_FILES: "true"
+  SECRET_KEY_BASE: placeholder-for-local-dev-only
+  # Kubernetes DNS for the postgres service deployed by the postgres chart
+  DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development
+  QUEUE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_queue
+  CABLE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_cable
+  # LLM endpoint — override to point at your local Ollama / LM Studio
+  LLM_BASE_URL: http://host.docker.internal:11434/v1
+  LLM_MODEL: llama3.2

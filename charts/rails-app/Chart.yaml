@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rails-app
+description: Rails chatbot application chart for local development
+type: application
+version: 0.1.0

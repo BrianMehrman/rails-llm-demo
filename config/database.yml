@@ -18,14 +18,17 @@ development:
   primary:
     <<: *default
     database: chatbot_development
+    url: <%= ENV["DATABASE_URL"] %>
   queue:
     <<: *default
     database: chatbot_development_queue
     migrations_paths: db/queue_migrate
+    url: <%= ENV["QUEUE_DATABASE_URL"] %>
   cable:
     <<: *default
     database: chatbot_development_cable
     migrations_paths: db/cable_migrate
+    url: <%= ENV["CABLE_DATABASE_URL"] %>
 
 test:
   primary:
