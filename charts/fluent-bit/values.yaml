@@ -2,6 +2,13 @@
 # Chart version: 0.47.9 (fluent/fluent-bit)
 # Deployed as a DaemonSet to collect logs from all pods and forward to Loki
 
+customParsers: |
+  [PARSER]
+      Name        rails_json
+      Format      json
+      Time_Key    timestamp
+      Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+
 config:
   service: |
     [SERVICE]
@@ -16,6 +23,15 @@ config:
         Path              /var/log/containers/*.log
         multiline.parser  docker, cri
         Tag               kube.*
+        Refresh_Interval  5
+        Mem_Buf_Limit     5MB
+        Skip_Long_Lines   On
+
+    [INPUT]
+        Name              tail
+        Path              /var/log/containers/rails-llm-demo*.log
+        Parser            rails_json
+        Tag               kube.rails.*
         Refresh_Interval  5
         Mem_Buf_Limit     5MB
         Skip_Long_Lines   On

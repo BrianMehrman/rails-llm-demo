@@ -13,7 +13,8 @@ class LlmClientTest < ActiveSupport::TestCase
 
     client = LlmClient.new
     result = client.chat([ { role: "user", content: "Hi" } ])
-    assert_equal "Hello from LLM", result
+    assert_equal "Hello from LLM", result[:content]
+    assert_nil result[:usage]
   end
 
   test "chat raises LlmClient::Error on non-200 response" do
@@ -36,7 +37,7 @@ class LlmClientTest < ActiveSupport::TestCase
 
     ClimateControl.modify(OPENAI_API_BASE: "http://custom-llm-host:8080/v1") do
       result = LlmClient.new.chat([ { role: "user", content: "Hi" } ])
-      assert_equal "ok", result
+      assert_equal "ok", result[:content]
     end
   end
 

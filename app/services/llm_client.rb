@@ -57,7 +57,7 @@ class LlmClient
         LLM_TOKENS.increment(by: usage[:total_tokens],      labels: { model: @model, type: "total" })
       end
 
-      result[:content]
+      result
     end
   rescue LlmClient::Error
     duration = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start

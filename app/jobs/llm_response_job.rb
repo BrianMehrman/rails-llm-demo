@@ -34,8 +34,20 @@ class LlmResponseJob < ApplicationJob
                     .map { |m| { role: m.role, content: m.content } }
 
       begin
-        response = LlmClient.new.chat(history)
-        assistant_msg.update!(content: response, status: "complete")
+        result = LlmClient.new.chat(history)
+        assistant_msg.update!(content: result[:content], status: "complete")
+        ctx = OpenTelemetry::Trace.current_span.context
+        payload = { event: "llm_job_complete", chat_id: chat_id, message_id: assistant_message_id }
+        if ctx.valid?
+          payload[:trace_id] = ctx.trace_id.unpack1("H*")
+          payload[:span_id]  = ctx.span_id.unpack1("H*")
+        end
+        if result[:usage]
+          payload[:prompt_tokens]     = result[:usage][:prompt_tokens]
+          payload[:completion_tokens] = result[:usage][:completion_tokens]
+          payload[:total_tokens]      = result[:usage][:total_tokens]
+        end
+        Rails.logger.info payload.to_json
         duration = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
         LLM_JOB_DURATION.observe(duration, labels: { status: "success" })
         span.status = OpenTelemetry::Trace::Status.ok
