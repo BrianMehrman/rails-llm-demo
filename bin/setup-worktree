@@ -1,16 +1,41 @@
 #!/usr/bin/env bash
-# Fires via the WorktreeCreate hook. Writes a settings.local.json into the new
-# worktree so sub-agents have the Bash permissions they need without prompts.
+# WorktreeCreate hook — creates a git worktree, writes a settings.local.json
+# with pre-approved Bash permissions, then echoes the worktree path to stdout
+# so Claude Code knows where the worktree lives.
 set -euo pipefail
 
 input=$(cat)
-worktree_path=$(echo "$input" | jq -r '.worktreePath // empty')
 
-if [ -z "$worktree_path" ]; then
-  echo "setup-worktree: no worktreePath in hook payload, skipping" >&2
-  exit 0
+branch=$(echo "$input" | jq -r '.branch // empty')
+suggested=$(echo "$input" | jq -r '.worktreePath // empty')
+
+repo_root=$(git rev-parse --show-toplevel)
+worktree_base="$repo_root/.claude/worktrees"
+mkdir -p "$worktree_base"
+
+# Decide on the worktree path
+if [ -n "$suggested" ]; then
+  worktree_path="$suggested"
+elif [ -n "$branch" ]; then
+  slug=$(echo "$branch" | tr '/' '-' | sed 's/[^a-zA-Z0-9._-]/-/g')
+  worktree_path="$worktree_base/$slug"
+else
+  worktree_path="$worktree_base/agent-$(date +%s)"
 fi
 
+# Create the worktree if it doesn't already exist
+if [ ! -d "$worktree_path" ]; then
+  if [ -n "$branch" ]; then
+    # Try creating a new branch from HEAD; fall back to checking out existing
+    git worktree add "$worktree_path" -b "$branch" HEAD 2>/dev/null || \
+      git worktree add "$worktree_path" "$branch" 2>/dev/null || \
+      git worktree add "$worktree_path" HEAD
+  else
+    git worktree add "$worktree_path" HEAD
+  fi
+fi
+
+# Write pre-approved Bash permissions so agents don't hit permission prompts
 claude_dir="$worktree_path/.claude"
 mkdir -p "$claude_dir"
 
@@ -32,4 +57,5 @@ cat > "$claude_dir/settings.local.json" <<'JSON'
 }
 JSON
 
-echo "setup-worktree: wrote $claude_dir/settings.local.json" >&2
+# Echo the path — required by the WorktreeCreate hook contract
+echo "$worktree_path"
