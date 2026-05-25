@@ -1,0 +1,36 @@
+# Jaeger values for local Kubernetes development
+# Chart version: 3.3.1 (jaegertracing/jaeger)
+
+# Use in-memory storage — fine for local dev, no persistence needed
+provisionDataStore:
+  cassandra: false
+  elasticsearch: false
+  kafka: false
+
+allInOne:
+  enabled: true
+  image:
+    tag: latest
+  args:
+    - "--memory.max-traces=10000"
+  extraEnv:
+    - name: COLLECTOR_OTLP_ENABLED
+      value: "true"
+
+storage:
+  type: memory
+
+collector:
+  service:
+    otlp:
+      http:
+        name: otlp-http
+        port: 4318
+
+query:
+  service:
+    type: ClusterIP
+    port: 16686
+
+agent:
+  enabled: false

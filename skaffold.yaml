@@ -32,6 +32,38 @@ deploy:
         setValueTemplates:
           image.repository: "{{.IMAGE_REPO_rails_app}}"
           image.tag: "{{.IMAGE_TAG_rails_app}}"
+      - name: kube-prometheus-stack
+        remoteChart: kube-prometheus-stack
+        repo: https://prometheus-community.github.io/helm-charts
+        version: "65.1.1"
+        valuesFiles:
+          - charts/kube-prometheus-stack/values.yaml
+        namespace: default
+        createNamespace: true
+      - name: loki
+        remoteChart: loki
+        repo: https://grafana.github.io/helm-charts
+        version: "6.18.0"
+        valuesFiles:
+          - charts/loki/values.yaml
+        namespace: default
+        createNamespace: true
+      - name: jaeger
+        remoteChart: jaeger
+        repo: https://jaegertracing.github.io/helm-charts
+        version: "3.3.1"
+        valuesFiles:
+          - charts/jaeger/values.yaml
+        namespace: default
+        createNamespace: true
+      - name: fluent-bit
+        remoteChart: fluent-bit
+        repo: https://fluent.github.io/helm-charts
+        version: "0.47.9"
+        valuesFiles:
+          - charts/fluent-bit/values.yaml
+        namespace: default
+        createNamespace: true
 
 portForward:
   - resourceType: service
@@ -49,3 +81,28 @@ portForward:
     namespace: default
     port: 3000
     localPort: 3000
+  - resourceType: service
+    resourceName: kube-prometheus-stack-grafana
+    namespace: default
+    port: 80
+    localPort: 3001
+  - resourceType: service
+    resourceName: kube-prometheus-stack-prometheus
+    namespace: default
+    port: 9090
+    localPort: 9090
+  - resourceType: service
+    resourceName: loki
+    namespace: default
+    port: 3100
+    localPort: 3100
+  - resourceType: service
+    resourceName: jaeger-query
+    namespace: default
+    port: 16686
+    localPort: 16686
+  - resourceType: service
+    resourceName: jaeger-collector
+    namespace: default
+    port: 4318
+    localPort: 4318
