@@ -38,4 +38,9 @@ class MessageTest < ActiveSupport::TestCase
     assert_not msg.valid?
     assert_includes msg.errors[:content], "can't be blank"
   end
+
+  test "pending message is valid without content" do
+    msg = Message.new(chat: @chat, role: "assistant", status: "pending")
+    assert msg.valid?, msg.errors.full_messages.to_s
+  end
 end

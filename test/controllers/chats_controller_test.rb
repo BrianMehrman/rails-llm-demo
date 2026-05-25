@@ -30,4 +30,17 @@ class ChatsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_redirected_to chats_url
   end
+
+  test "GET /chats/new renders the new form" do
+    get new_chat_url
+    assert_response :success
+    assert_select "h1", "New Chat"
+  end
+
+  test "POST /chats with blank title re-renders new with 422" do
+    assert_no_difference("Chat.count") do
+      post chats_url, params: { chat: { title: "" } }
+    end
+    assert_response :unprocessable_entity
+  end
 end
