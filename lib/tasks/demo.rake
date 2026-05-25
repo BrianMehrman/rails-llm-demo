@@ -51,21 +51,24 @@ namespace :demo do
       }
     ]
 
-    seed_data.each do |chat_data|
-      puts "\nSeeding chat: #{chat_data[:title]}"
-      chat = Chat.create!(title: chat_data[:title])
+    begin
+      seed_data.each do |chat_data|
+        puts "\nSeeding chat: #{chat_data[:title]}"
+        chat = Chat.create!(title: chat_data[:title])
 
-      chat_data[:messages].each do |user_content|
-        puts "  → #{user_content.truncate(60)}"
+        chat_data[:messages].each do |user_content|
+          puts "  → #{user_content.truncate(60)}"
 
-        user_msg = chat.messages.create!(role: "user", content: user_content, status: "complete")
-        assistant_msg = chat.messages.create!(role: "assistant", content: "", status: "pending")
+          chat.messages.create!(role: "user", content: user_content, status: "complete")
+          assistant_msg = chat.messages.create!(role: "assistant", content: "", status: "pending")
 
-        LlmResponseJob.perform_now(chat.id, assistant_msg.id)
+          LlmResponseJob.perform_now(chat.id, assistant_msg.id)
+        end
       end
+    ensure
+      OpenTelemetry.tracer_provider.force_flush if ENV["OTEL_ENABLED"] == "true"
     end
 
-    OpenTelemetry.tracer_provider.force_flush if ENV["OTEL_ENABLED"] == "true"
     puts "\nSeed complete. Open http://localhost:3001 to see the Grafana dashboard."
   end
 
@@ -117,16 +120,15 @@ namespace :demo do
         ENV["OPENAI_API_BASE"] = step[:api_base_override]
       end
 
-      user_msg = chat.messages.create!(role: "user", content: step[:content], status: "complete")
-      assistant_msg = chat.messages.create!(role: "assistant", content: "", status: "pending")
+      begin
+        chat.messages.create!(role: "user", content: step[:content], status: "complete")
+        assistant_msg = chat.messages.create!(role: "assistant", content: "", status: "pending")
 
-      LlmResponseJob.perform_now(chat.id, assistant_msg.id)
-
-      if step[:api_base_override]
-        ENV["OPENAI_API_BASE"] = original_api_base
+        LlmResponseJob.perform_now(chat.id, assistant_msg.id)
+      ensure
+        ENV["OPENAI_API_BASE"] = original_api_base if step[:api_base_override]
+        OpenTelemetry.tracer_provider.force_flush if ENV["OTEL_ENABLED"] == "true"
       end
-
-      OpenTelemetry.tracer_provider.force_flush if ENV["OTEL_ENABLED"] == "true"
     end
 
     puts "\nScenario complete. Check the LLM Overview dashboard in Grafana at http://localhost:3001"
