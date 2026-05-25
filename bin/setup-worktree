@@ -26,12 +26,13 @@ fi
 # Create the worktree if it doesn't already exist
 if [ ! -d "$worktree_path" ]; then
   if [ -n "$branch" ]; then
-    # Try creating a new branch from HEAD; fall back to checking out existing
-    git worktree add "$worktree_path" -b "$branch" HEAD 2>/dev/null || \
-      git worktree add "$worktree_path" "$branch" 2>/dev/null || \
-      git worktree add "$worktree_path" HEAD
+    # Redirect stdout to stderr so git's "HEAD is now at..." line
+    # doesn't mix with the path we echo at the end.
+    git worktree add "$worktree_path" -b "$branch" HEAD 1>&2 || \
+      git worktree add "$worktree_path" "$branch" 1>&2 || \
+      git worktree add "$worktree_path" HEAD 1>&2
   else
-    git worktree add "$worktree_path" HEAD
+    git worktree add "$worktree_path" HEAD 1>&2
   fi
 fi
 
