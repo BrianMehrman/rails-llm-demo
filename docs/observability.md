@@ -60,6 +60,35 @@ Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scra
 - **Jaeger** runs in all-in-one mode with in-memory storage — suitable for local development. The Rails app sends OTLP traces directly to the in-cluster collector at `http://jaeger-collector.default.svc.cluster.local:4318`.
 - **Grafana** is pre-configured with anonymous access disabled — log in with `admin` / `admin`.
 
+## Grafana LLM Dashboard
+
+After `skaffold dev` is running, open Grafana at http://localhost:3001 and log in with **admin / admin**.
+
+The **LLM Overview** dashboard is pre-provisioned — no manual import or setup is required. It appears under Dashboards as soon as Grafana starts.
+
+### Data sources
+
+All three data sources are connected automatically via Helm values:
+
+| Data Source | Type | In-cluster URL |
+|---|---|---|
+| Prometheus | prometheus | (default, managed by kube-prometheus-stack) |
+| Loki | loki | `http://loki.default.svc.cluster.local:3100` |
+| Jaeger | jaeger | `http://jaeger-query.default.svc.cluster.local:16686` |
+
+### Dashboard panels
+
+The LLM Overview dashboard contains four panels:
+
+| Panel | Metric | Description |
+|---|---|---|
+| LLM Request Latency | `llm_request_duration_seconds` | p50 / p95 / p99 HTTP-level latency for LLM requests |
+| Token Usage Over Time | `llm_tokens_total` | Rate of prompt, completion, and total tokens over time |
+| LLM Error Rate | `llm_request_duration_seconds_count{status="error"}` | Errors per second from failed LLM requests |
+| Job Duration | `llm_job_duration_seconds` | p50 / p95 background job processing time |
+
+The dashboard JSON source is at `charts/kube-prometheus-stack/dashboards/llm-overview.json` and is provisioned into Grafana via the `dashboards` section of `charts/kube-prometheus-stack/values.yaml`.
+
 ## Stop the stack
 
 ```bash
