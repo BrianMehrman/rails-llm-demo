@@ -1,5 +1,13 @@
 apiVersion: skaffold/v4beta11
 kind: Config
+build:
+  artifacts:
+    - image: rails-app
+      docker:
+        dockerfile: Dockerfile
+  local:
+    push: false
+
 deploy:
   helm:
     releases:
@@ -15,6 +23,15 @@ deploy:
           - charts/redis/values.yaml
         namespace: default
         createNamespace: true
+      - name: rails-app
+        chartPath: charts/rails-app
+        valuesFiles:
+          - charts/rails-app/values.yaml
+        namespace: default
+        createNamespace: true
+        setValueTemplates:
+          image.repository: "{{.IMAGE_REPO_rails_app}}"
+          image.tag: "{{.IMAGE_TAG_rails_app}}"
 
 portForward:
   - resourceType: service
@@ -27,3 +44,8 @@ portForward:
     namespace: default
     port: 6379
     localPort: 6379
+  - resourceType: service
+    resourceName: rails-app
+    namespace: default
+    port: 3000
+    localPort: 3000
