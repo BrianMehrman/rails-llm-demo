@@ -32,7 +32,7 @@
 
 - `bin/rails generate dockerfile` produces a starting point — review and tune for this app (no Node, no asset compilation at runtime, three DB connections)
 - Set `RAILS_ENV=production` in the container but provide `SECRET_KEY_BASE` via env var (a placeholder value is fine for local dev)
-- `database.yml` should already support env var overrides via ERB — confirm before adding new config
+- `database.yml` needs `url:` keys added to each database role so Kubernetes secrets can be passed as a single connection string. Add `url: <%= ENV["DATABASE_URL"] %>` to `primary`, `url: <%= ENV["QUEUE_DATABASE_URL"] %>` to `queue`, and `url: <%= ENV["CABLE_DATABASE_URL"] %>` to `cable`. When the env var is nil Rails ignores the key and falls back to the individual host/port/user/password settings — fully backward-compatible with local dev.
 - The Helm chart should use `imagePullPolicy: Never` for local development so Skaffold can inject the locally-built image
 - Keep the chart minimal: Deployment + ClusterIP Service + basic liveness probe on `GET /up`
 

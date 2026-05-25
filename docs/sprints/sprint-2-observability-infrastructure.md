@@ -8,11 +8,11 @@
 
 ---
 
-## Story 2-1: Structured Logging with Trace Correlation
+## Story 2-1a: Lograge Setup (Request Logging)
 
 **As a** platform engineer following the blog post,
-**I want** every Rails request and job log line to be structured JSON containing the OTEL trace ID and span ID,
-**So that** I can click a Loki log entry in Grafana and jump directly to the matching Jaeger trace.
+**I want** every Rails request log line to be structured JSON containing the OTEL trace ID and span ID,
+**So that** logs are machine-readable and carry the context needed to correlate with Jaeger traces.
 
 ### Acceptance Criteria
 
@@ -21,10 +21,6 @@
 - [ ] Every request log line includes: `trace_id`, `span_id`, `method`, `path`, `status`, `duration`, `timestamp`
 - [ ] When `OTEL_ENABLED=false`, `trace_id` and `span_id` are omitted gracefully — no errors, no `nil` strings
 - [ ] When `OTEL_ENABLED=true`, `trace_id` and `span_id` are W3C hex-encoded values from the active OTEL span
-- [ ] `LlmResponseJob` log lines include `trace_id`, `span_id`, `chat_id`, `message_id`, and token counts when available
-- [ ] Fluent Bit correctly parses JSON log lines from the Rails container (Fluent Bit parser config updated in `charts/fluent-bit/values.yaml` if needed)
-- [ ] In Grafana → Explore → Loki, querying `{app="rails-llm-demo"}` returns structured JSON log entries with `trace_id` visible
-- [ ] Clicking a `trace_id` value in Grafana navigates to the matching trace in Jaeger (Grafana derived field configured)
 - [ ] `bin/rubocop` passes
 
 ### Technical Notes
@@ -43,16 +39,49 @@
     ctx.valid? ? { trace_id: ctx.trace_id.unpack1("H*"), span_id: ctx.span_id.unpack1("H*") } : {}
   end
   ```
-- Grafana derived field: in the Loki datasource config (Helm values), add a derived field that matches `trace_id` and links to `http://localhost:16686/trace/${__value.raw}` in Jaeger
 - Do not add `OTEL_ENABLED` guards beyond the existing initializer — `ctx.valid?` returning false is sufficient
 
 ### Files
 
 - Modify: `Gemfile`
 - Create: `config/initializers/lograge.rb`
+
+### Dependencies
+
+- None — runs in Wave 1 alongside infra and instrumentation work
+
+---
+
+## Story 2-1b: Job Logging and Fluent Bit Configuration
+
+**As a** platform engineer following the blog post,
+**I want** `LlmResponseJob` log lines to be structured JSON with trace ID and token counts, collected by Fluent Bit and visible in Loki,
+**So that** I can click a Loki log entry in Grafana and jump directly to the matching Jaeger trace.
+
+### Acceptance Criteria
+
+- [ ] `LlmResponseJob` emits a structured JSON log line containing: `trace_id`, `span_id`, `chat_id`, `message_id`, and token counts when available
+- [ ] When `OTEL_ENABLED=false`, `trace_id` and `span_id` are omitted gracefully
+- [ ] Fluent Bit correctly parses JSON log lines from the Rails container (Fluent Bit parser config updated in `charts/fluent-bit/values.yaml`)
+- [ ] In Grafana → Explore → Loki, querying `{app="rails-llm-demo"}` returns structured JSON log entries with `trace_id` visible
+- [ ] `bin/rubocop` passes
+
+### Technical Notes
+
+- Use the same `ctx.valid?` guard pattern from Story 2-1a to extract trace context inside the job
+- Token counts are available on the job via the result returned from `LlmClient#chat` (added in Story 1-3)
+- Fluent Bit JSON parser: set `Format json` in the `[PARSER]` section of the Fluent Bit Helm values so structured Rails logs are parsed rather than treated as plain text
+
+### Files
+
 - Modify: `app/jobs/llm_response_job.rb` (add structured log line with trace context and token counts)
-- Modify: `charts/fluent-bit/values.yaml` (JSON parser for Rails logs if not already configured)
-- Modify: `charts/loki/values.yaml` (derived field for trace ID → Jaeger link)
+- Modify: `charts/fluent-bit/values.yaml` (JSON parser for Rails logs)
+
+### Dependencies
+
+- Story 1-2 (Fluent Bit chart must exist before its values can be extended)
+- Story 1-4 (job span must exist so trace context is active inside the job)
+- Story 2-1a (lograge provides the trace extraction pattern; Gemfile change must be merged first)
 
 ---
 
@@ -92,6 +121,9 @@
 
 ### Dependencies
 
-- Story 2-1 (trace ID in logs enables the Loki → Jaeger derived field link)
+- Story 2-1a (lograge provides trace context infrastructure; Gemfile change must be merged first)
+- Story 1-2 (kube-prometheus-stack chart must exist before its values can be extended)
 - Story 1-3 (token metrics must exist for token usage panel)
 - Story 1-4 (job duration metric must exist for job duration panel)
+
+> **Note:** Story 2-1b runs in parallel with this story (Wave 3). The Loki → Jaeger derived field can be configured in this story's Helm values without 2-1b being merged first; full end-to-end verification of the link requires 2-1b to be merged before testing.
