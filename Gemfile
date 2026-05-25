@@ -43,6 +43,7 @@ gem "thruster", require: false
 gem "image_processing", "~> 1.2"
 
 # Observability
+gem "lograge"
 gem "prometheus-client"
 gem "opentelemetry-sdk"
 gem "opentelemetry-exporter-otlp"
