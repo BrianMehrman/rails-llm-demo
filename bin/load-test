@@ -1,0 +1,234 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "net/http"
+require "uri"
+require "json"
+require "webrick"
+require "optparse"
+
+# Parse command-line options
+options = {
+  mode: nil,
+  concurrency: 3,
+  duration: 60,
+  latency: 500,
+  rails_url: "http://localhost:3000"
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/load-test [--stub | --real] [options]"
+  opts.separator ""
+  opts.separator "Modes (exactly one required):"
+  opts.on("--stub", "Start a WEBrick LLM stub and run load against it") { options[:mode] = :stub }
+  opts.on("--real", "Run load against a live Ollama/LLM endpoint") { options[:mode] = :real }
+  opts.separator ""
+  opts.separator "Options:"
+  opts.on("--concurrency N", Integer, "Number of concurrent threads (default: 3)") { |n| options[:concurrency] = n }
+  opts.on("--duration Ns", String, "Test duration in seconds, e.g. 60s (default: 60s)") do |d|
+    options[:duration] = d.to_i
+  end
+  opts.on("--latency MS", Integer, "Artificial stub latency in milliseconds (default: 500, stub mode only)") do |ms|
+    options[:latency] = ms
+  end
+  opts.on("--rails-url URL", String, "Rails app URL (default: http://localhost:3000)") do |url|
+    options[:rails_url] = url
+  end
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit 0
+  end
+end
+
+parser.parse!
+
+unless options[:mode]
+  warn "Error: specify --stub or --real"
+  warn parser
+  exit 1
+end
+
+RAILS_URL = options[:rails_url]
+STUB_PORT = 19876
+STUB_RESPONSE = JSON.generate(
+  choices: [
+    { message: { content: "stub response" }, finish_reason: "stop" }
+  ],
+  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+)
+
+# ---------------------------------------------------------------------------
+# Stub server (WEBrick in a background thread)
+# ---------------------------------------------------------------------------
+def start_stub_server(port, latency_ms)
+  log = WEBrick::Log.new(File::NULL)
+  access_log = [ [ File.open(File::NULL, "w"), WEBrick::AccessLog::COMMON_LOG_FORMAT ] ]
+
+  server = WEBrick::HTTPServer.new(
+    Port: port,
+    Logger: log,
+    AccessLog: access_log
+  )
+
+  server.mount_proc("/v1/chat/completions") do |_req, res|
+    sleep(latency_ms / 1000.0)
+    res.status = 200
+    res["Content-Type"] = "application/json"
+    res.body = STUB_RESPONSE
+  end
+
+  Thread.new { server.start }
+  server
+end
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+def post_form(url, params)
+  uri = URI.parse(url)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.open_timeout = 10
+  http.read_timeout = 120
+
+  req = Net::HTTP::Post.new(uri.request_uri)
+  req.set_form_data(params)
+
+  http.request(req)
+end
+
+def create_chat(rails_url)
+  title = "load-test-#{Process.pid}-#{Time.now.to_i}"
+  res = post_form("#{rails_url}/chats", { "chat[title]" => title })
+
+  unless [ 200, 201, 302, 303 ].include?(res.code.to_i)
+    warn "Failed to create chat: HTTP #{res.code}"
+    warn res.body.to_s[0, 500]
+    exit 1
+  end
+
+  # Rails redirects to /chats/:id — extract the ID from Location header
+  location = res["Location"]
+  unless location
+    warn "No Location header in create-chat response (HTTP #{res.code})"
+    exit 1
+  end
+
+  id = location.split("/").last
+  unless id && !id.empty?
+    warn "Could not parse chat ID from Location: #{location}"
+    exit 1
+  end
+
+  id
+end
+
+def send_message(rails_url, chat_id)
+  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  res = post_form("#{rails_url}/chats/#{chat_id}/messages", { "content" => "Hello from load test" })
+  t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+  success = [ 200, 201, 302, 303 ].include?(res.code.to_i)
+  [ success, t1 - t0 ]
+end
+
+# ---------------------------------------------------------------------------
+# Stats helpers
+# ---------------------------------------------------------------------------
+def percentile(sorted_arr, pct)
+  return 0.0 if sorted_arr.empty?
+
+  idx = (pct / 100.0 * (sorted_arr.size - 1)).ceil
+  sorted_arr[idx]
+end
+
+def print_summary(sent, errors, latencies)
+  successes = sent - errors
+  sorted = latencies.sort
+  p50 = percentile(sorted, 50)
+  p95 = percentile(sorted, 95)
+
+  puts ""
+  puts "=" * 40
+  puts "Load test summary"
+  puts "=" * 40
+  puts "  Total requests : #{sent}"
+  puts "  Successes      : #{successes}"
+  puts "  Errors         : #{errors}"
+  puts "  p50 latency    : #{(p50 * 1000).round(1)} ms"
+  puts "  p95 latency    : #{(p95 * 1000).round(1)} ms"
+  puts "=" * 40
+end
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+# Optionally set OPENAI_API_BASE for stub mode so the Rails app uses the stub
+stub_server = nil
+if options[:mode] == :stub
+  stub_server = start_stub_server(STUB_PORT, options[:latency])
+  ENV["OPENAI_API_BASE"] = "http://localhost:#{STUB_PORT}/v1"
+  puts "Stub LLM server started on port #{STUB_PORT} (latency: #{options[:latency]}ms)"
+  sleep 0.2 # give WEBrick a moment to bind
+end
+
+puts "Creating test chat on #{RAILS_URL}..."
+chat_id = create_chat(RAILS_URL)
+puts "Using chat ID: #{chat_id}"
+puts ""
+puts "Starting load test — mode=#{options[:mode]}, concurrency=#{options[:concurrency]}, duration=#{options[:duration]}s"
+puts ""
+
+# Shared state protected by a mutex
+mutex = Mutex.new
+total_sent = 0
+total_errors = 0
+latencies = []
+stop = false
+
+# Ctrl-C handler — set stop flag, print partial summary
+Signal.trap("INT") do
+  stop = true
+end
+
+# Deadline
+deadline = Time.now + options[:duration]
+
+# Spawn worker threads
+threads = options[:concurrency].times.map do
+  Thread.new do
+    until stop || Time.now >= deadline
+      success, elapsed = send_message(RAILS_URL, chat_id)
+      mutex.synchronize do
+        total_sent += 1
+        total_errors += 1 unless success
+        latencies << elapsed
+      end
+    end
+  end
+end
+
+# Progress printer (main thread)
+start_time = Time.now
+until stop || Time.now >= deadline
+  mutex.synchronize do
+    elapsed = (Time.now - start_time).round(1)
+    print "\r  sent=#{total_sent}  errors=#{total_errors}  elapsed=#{elapsed}s   "
+    $stdout.flush
+  end
+  sleep 1
+end
+
+stop = true
+threads.each(&:join)
+
+# Final progress line
+mutex.synchronize do
+  elapsed = (Time.now - start_time).round(1)
+  print "\r  sent=#{total_sent}  errors=#{total_errors}  elapsed=#{elapsed}s   "
+  $stdout.flush
+end
+
+print_summary(total_sent, total_errors, latencies)
+
+stub_server&.shutdown
