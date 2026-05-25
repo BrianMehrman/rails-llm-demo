@@ -1,12 +1,16 @@
 # Observability
 
-The app ships with a Docker Compose stack: Jaeger (traces), Prometheus (metrics), Loki (logs), Grafana (dashboards), and Fluent Bit (log shipping).
+The app ships with a full observability stack deployed into Kubernetes via Skaffold: Jaeger (traces), Prometheus (metrics), Loki (logs), Grafana (dashboards), and Fluent Bit (log shipping).
 
 ## Start the stack
 
+The observability stack starts automatically with the rest of the local Kubernetes environment:
+
 ```bash
-docker compose -f docker-compose.observability.yml up -d
+skaffold dev
 ```
+
+Skaffold deploys all services — Postgres, Redis, the Rails app, and the full observability stack — and sets up port-forwards automatically.
 
 Then enable tracing in `.env`:
 
@@ -14,13 +18,13 @@ Then enable tracing in `.env`:
 OTEL_ENABLED=true
 ```
 
-Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scrapes metrics every 15s.
+Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scrapes metrics every 15s via the `ServiceMonitor` resource in `charts/rails-app/templates/service-monitor.yaml`.
 
 ## Services
 
 | Service | URL | Purpose |
 |---|---|---|
-| Grafana | http://localhost:3001 | Unified dashboards |
+| Grafana | http://localhost:3001 | Unified dashboards (admin / admin) |
 | Jaeger | http://localhost:16686 | Distributed trace viewer |
 | Prometheus | http://localhost:9090 | Metrics query |
 | Loki | http://localhost:3100 | Log aggregation |
@@ -37,12 +41,27 @@ Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scra
 | Variable | Default | Purpose |
 |---|---|---|
 | `OTEL_ENABLED` | `false` | Master switch — set `true` to activate |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector (Jaeger) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger-collector.default.svc.cluster.local:4318` | OTLP HTTP collector (Jaeger in-cluster). Set to `http://localhost:4318` when running the Rails server outside Kubernetes. |
 | `OTEL_SERVICE_NAME` | `rails-llm-demo` | Service name shown in traces |
-| `RAILS_METRICS_TARGET` | `host.docker.internal:3000` | Host/port Prometheus scrapes for `/metrics`. Default works with Docker Desktop (Mac/Windows). On Linux set to your host IP or container name. For Kubernetes, set to the service name and port. |
+
+## Helm chart versions
+
+| Chart | Repository | Version |
+|---|---|---|
+| `kube-prometheus-stack` | prometheus-community | 65.1.1 |
+| `loki` | grafana | 6.18.0 |
+| `jaeger` | jaegertracing | 3.3.1 |
+| `fluent-bit` | fluent | 0.47.9 |
+
+## Architecture
+
+- **Prometheus** scrapes the Rails `/metrics` endpoint via a `ServiceMonitor` resource (`charts/rails-app/templates/service-monitor.yaml`). The `kube-prometheus-stack` is configured with `serviceMonitorSelector: {}` so it discovers all `ServiceMonitor` resources in the cluster.
+- **Fluent Bit** runs as a DaemonSet, collecting logs from all pod containers via `/var/log/containers/` and forwarding to Loki at `loki.default.svc.cluster.local:3100`.
+- **Jaeger** runs in all-in-one mode with in-memory storage — suitable for local development. The Rails app sends OTLP traces directly to the in-cluster collector at `http://jaeger-collector.default.svc.cluster.local:4318`.
+- **Grafana** is pre-configured with anonymous access disabled — log in with `admin` / `admin`.
 
 ## Stop the stack
 
 ```bash
-docker compose -f docker-compose.observability.yml down
+# Stop skaffold dev with Ctrl+C — it will clean up all Kubernetes resources
 ```

@@ -1,0 +1,23 @@
+# kube-prometheus-stack values for local Kubernetes development
+# Chart version: 65.1.1 (prometheus-community/kube-prometheus-stack)
+
+alertmanager:
+  enabled: false
+
+grafana:
+  adminPassword: admin
+  service:
+    type: ClusterIP
+    port: 80
+
+prometheus:
+  service:
+    type: ClusterIP
+    port: 9090
+  prometheusSpec:
+    # Allow Prometheus to find ServiceMonitors in all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    # Scrape interval
+    scrapeInterval: 15s

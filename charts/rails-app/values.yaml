@@ -24,3 +24,6 @@ env:
   # LLM endpoint — override to point at your local Ollama / LM Studio
   LLM_BASE_URL: http://host.docker.internal:11434/v1
   LLM_MODEL: llama3.2
+  # Observability — OpenTelemetry OTLP endpoint points at the in-cluster Jaeger collector
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-collector.default.svc.cluster.local:4318
+  OTEL_SERVICE_NAME: rails-llm-demo
