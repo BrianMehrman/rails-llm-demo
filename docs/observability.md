@@ -94,3 +94,36 @@ The dashboard JSON source is at `charts/kube-prometheus-stack/dashboards/llm-ove
 ```bash
 # Stop skaffold dev with Ctrl+C — it will clean up all Kubernetes resources
 ```
+
+## Demo Seed Task
+
+Run the seed task to populate the app with realistic chat history and fire it through the full LLM stack:
+
+```bash
+bin/rails demo:seed
+```
+
+This creates 5 demo chats with realistic conversation history. Each message is processed through `LlmResponseJob` synchronously, producing traces in Jaeger, metrics in Prometheus, and structured logs in Loki. The task is idempotent — running it twice skips creation if demo chats already exist.
+
+**Prerequisites:** `skaffold dev` running with `OPENAI_API_BASE` pointing to a live Ollama endpoint with a model pulled.
+
+## Demo Scenario Task
+
+Run the scenario task to trigger a scripted sequence of observable events:
+
+```bash
+bin/rails demo:scenario
+```
+
+This runs four requests in sequence, each designed to produce distinct signal in the Grafana dashboard:
+
+| Step | What it does | Signal to watch |
+|------|-------------|-----------------|
+| Normal | Short prompt, baseline latency | Green in error rate panel |
+| Slow | 200+ word prompt for high token count | Spike in p95 latency panel |
+| Error | Unreachable host override | Red bar in error rate panel |
+| Recovery | Short prompt back to normal | Latency returns to baseline |
+
+OTEL spans are flushed between each step so each trace lands in Jaeger before the next starts.
+
+**Prerequisites:** `skaffold dev` running with `OPENAI_API_BASE` pointing to a live Ollama endpoint.
