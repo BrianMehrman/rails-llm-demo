@@ -69,7 +69,7 @@ namespace :demo do
       OpenTelemetry.tracer_provider.force_flush if ENV["OTEL_ENABLED"] == "true"
     end
 
-    puts "\nSeed complete. Open http://localhost:3001 to see the Grafana dashboard."
+    puts "\nSeed complete. Open Grafana at http://localhost:3001 → LLM Overview dashboard to see the signal."
   end
 
   desc "Run a scripted sequence: normal, slow, error, recovery — for blog post screenshots"

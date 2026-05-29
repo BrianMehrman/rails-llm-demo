@@ -4,8 +4,10 @@
 require "net/http"
 require "uri"
 require "json"
-require "webrick"
 require "optparse"
+require "socket"
+# webrick is required lazily inside start_stub_server (stub mode only) — it is not a
+# default gem in Ruby 3.0+, and --real mode does not need it.
 
 # Parse command-line options
 options = {
@@ -48,6 +50,19 @@ unless options[:mode]
   exit 1
 end
 
+def check_llm_reachable!
+  base = ENV.fetch("OPENAI_API_BASE", "http://localhost:11434/v1")
+  uri = URI.parse(base)
+  Socket.tcp(uri.host, uri.port, connect_timeout: 3) { }
+rescue StandardError
+  warn "Cannot reach the LLM endpoint at #{base}."
+  warn "--real mode needs a live Ollama (or OpenAI-compatible) endpoint."
+  warn "Start it (e.g. `ollama serve`) and pull a model (`ollama pull llama4`), then retry."
+  exit 1
+end
+
+check_llm_reachable! if options[:mode] == :real
+
 RAILS_URL = options[:rails_url]
 STUB_PORT = 19876
 STUB_RESPONSE = JSON.generate(
@@ -61,6 +76,7 @@ STUB_RESPONSE = JSON.generate(
 # Stub server (WEBrick in a background thread)
 # ---------------------------------------------------------------------------
 def start_stub_server(port, latency_ms)
+  require "webrick"
   log = WEBrick::Log.new(File::NULL)
   access_log = [ [ File.open(File::NULL, "w"), WEBrick::AccessLog::COMMON_LOG_FORMAT ] ]
 

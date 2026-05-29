@@ -43,4 +43,10 @@ class ChatsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_response :unprocessable_entity
   end
+
+  test "GET /chats shows the app tagline" do
+    get chats_url
+    assert_response :success
+    assert_select ".page-header__subtitle", text: "Rails LLM observability demo"
+  end
 end

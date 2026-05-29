@@ -21,9 +21,11 @@ env:
   DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development
   QUEUE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_queue
   CABLE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_cable
-  # LLM endpoint — override to point at your local Ollama / LM Studio
-  LLM_BASE_URL: http://host.docker.internal:11434/v1
-  LLM_MODEL: llama3.2
-  # Observability — OpenTelemetry OTLP endpoint points at the in-cluster Jaeger collector
+  # LLM endpoint — the app reads OPENAI_API_BASE (app/services/llm_client.rb).
+  # host.docker.internal reaches Ollama running on the host from inside the cluster.
+  OPENAI_API_BASE: http://host.docker.internal:11434/v1
+  LLM_MODEL: llama4
+  # Observability — enabled in-cluster so traces reach Jaeger out of the box.
+  OTEL_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger-collector.default.svc.cluster.local:4318
   OTEL_SERVICE_NAME: rails-llm-demo

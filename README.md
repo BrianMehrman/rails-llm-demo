@@ -1,98 +1,80 @@
 # rails-llm-demo
 
-A Rails 8.1 chatbot app with real-time AI responses, backed by SolidQueue, Solid Cable, and an optional OpenTelemetry observability stack.
+A Rails 8.1 chatbot that demonstrates end-to-end observability for a local LLM workload. Every message becomes a distributed trace (Jaeger), a set of metrics (Prometheus), and a structured log line (Loki) — all visible in a pre-provisioned Grafana dashboard. The whole stack — app, databases, and observability tooling — runs in Kubernetes via Skaffold.
 
-## Requirements
+The companion blog post targets platform engineers evaluating local LLM tooling. To run the demo yourself, follow **[docs/getting-started.md](docs/getting-started.md)**.
 
-- Ruby 3.3.8
-- Docker Desktop with Kubernetes enabled
-- `kubectl` and `skaffold` CLI tools
-- [Ollama](https://ollama.com) (or any OpenAI-compatible LLM endpoint)
+## Prerequisites
 
-## How it works
-
-User messages are saved to Postgres. A SolidQueue job calls the LLM and streams the response back to the browser via Solid Cable (ActionCable over Postgres). SolidQueue workers run inside Puma automatically — no separate worker process needed.
-
-## Databases
-
-Three Postgres databases run from a single Kubernetes pod:
-
-| Database | Purpose |
-|---|---|
-| `chatbot_development` | App data — chats and messages |
-| `chatbot_development_queue` | SolidQueue job storage |
-| `chatbot_development_cable` | Solid Cable message bus |
-
-`bin/rails db:setup` creates and migrates all three.
-
-## LLM setup
-
-The app calls any OpenAI-compatible endpoint. [Ollama](https://ollama.com) is the easiest local option:
-
-```bash
-brew install ollama
-ollama pull llama4
-ollama serve          # starts on localhost:11434 by default
-```
-
-## Environment variables
-
-Copy `.env.example` to `.env`:
-
-```bash
-cp .env.example .env
-```
-
-`.env` is gitignored. The defaults work out of the box for the Kubernetes setup.
-
-| Variable | Default | Purpose |
+| Tool | Version | Notes |
 |---|---|---|
-| `DB_HOST` | `localhost` | Postgres host |
-| `DB_PORT` | `5432` | Postgres port (forwarded to localhost by skaffold) |
-| `REDIS_URL` | `redis://localhost:6379` | Redis URL |
-| `OPENAI_API_BASE` | `http://localhost:11434/v1` | LLM endpoint |
-| `LLM_MODEL` | `llama4` | Model name passed to the LLM |
-| `OTEL_ENABLED` | `false` | Set `true` to enable tracing |
+| Docker Desktop | latest | With Kubernetes enabled (or another local cluster: k3d, kind) |
+| `kubectl` | 1.28+ | |
+| `helm` | 3.x | Skaffold invokes Helm to deploy the charts |
+| `skaffold` | 2.x | Orchestrates build + deploy + port-forward |
+| [Ollama](https://ollama.com) | latest | Any OpenAI-compatible endpoint works; Ollama is the easiest local option |
+| Ruby | 3.3.8 | Only needed to run `bin/load-test` from the host |
 
-## First-time setup
+Redis is deployed by the stack but is **not required** for core features — Solid Cable runs over Postgres. It is present for optional experimentation only.
 
-```bash
-bundle install
-cp .env.example .env
-skaffold dev --port-forward   # terminal 1 — starts Postgres + Redis pods
-bin/rails db:setup            # creates all three databases and loads schemas
-```
-
-## Daily start
+Pull a model before starting:
 
 ```bash
-skaffold dev --port-forward   # terminal 1
-bin/rails server              # terminal 2 — http://localhost:3000
+ollama pull llama4
+ollama serve   # listens on localhost:11434
 ```
 
-## Reset the database
-
-Run this if Postgres fails with `initdb: error: directory is not empty` or you want a clean slate:
+## Quick start
 
 ```bash
-bin/reset-db
+git clone <repo-url> && cd rails-llm-demo
+skaffold dev      # builds the image, deploys everything, forwards ports
 ```
 
-This removes the Kubernetes hostPath volume, restarts the Postgres pod, and runs `db:reset`.
+`skaffold dev` brings up Postgres, Redis, the Rails app, and the full observability stack. Database migrations run **automatically** when the Rails container boots (`bin/docker-entrypoint` runs `db:prepare`) — there is no manual `db:setup` step. When the app is ready, open <http://localhost:3000>.
 
-## Running tests
+The in-cluster app reaches Ollama on your host via `host.docker.internal:11434` (configured in `charts/rails-app/values.yaml`). On Docker Desktop this works out of the box; on Linux/k3d you may need to adjust the host address.
 
-```bash
-bin/rails test
-```
+## Ports
 
-## Observability
+The stack occupies these fixed ports. Check for conflicts before starting — running multiple instances on one machine is not yet supported (see `docs/specs/future-multi-instance-ports.md`).
 
-See [docs/observability.md](docs/observability.md) for the full Jaeger + Prometheus + Loki + Grafana setup.
-
-## Scripts
-
-| Script | Purpose |
+| Port | Service |
 |---|---|
-| `bin/setup` | Install deps, prepare all databases, start server |
-| `bin/reset-db` | Clear hostPath data, restart Postgres pod, run `db:reset` |
+| 3000 | Rails app |
+| 3001 | Grafana |
+| 9090 | Prometheus |
+| 16686 | Jaeger UI |
+| 4318 | Jaeger OTLP collector (HTTP) |
+| 3100 | Loki |
+| 5432 | Postgres |
+| 6379 | Redis |
+
+## Generate signal
+
+Run these against a running stack to populate the dashboards. Because Prometheus scrapes the in-cluster pod and Fluent Bit collects pod logs, the rake tasks must run **inside the cluster**:
+
+```bash
+kubectl exec -it deploy/rails-app -- bin/rails demo:seed       # historical chat data
+kubectl exec -it deploy/rails-app -- bin/rails demo:scenario   # normal → slow → error → recovery
+```
+
+The load generator runs from the host (it drives the app over HTTP):
+
+```bash
+bin/load-test --stub                 # synthetic latency, no Ollama needed
+bin/load-test --real --duration 60s  # full stack through Ollama
+```
+
+## Documentation
+
+- **[docs/getting-started.md](docs/getting-started.md)** — step-by-step walkthrough from clone to populated Grafana
+- **[docs/observability.md](docs/observability.md)** — what's instrumented, dashboard panels, Helm chart versions
+- **[docs/architecture.md](docs/architecture.md)** — component diagram and data flow
+
+## Tests
+
+```bash
+bin/ci          # full local CI: tests, rubocop, brakeman, bundler-audit
+bin/rails test  # unit + integration tests only
+```
