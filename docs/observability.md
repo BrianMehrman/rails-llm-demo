@@ -10,15 +10,9 @@ The observability stack starts automatically with the rest of the local Kubernet
 skaffold dev
 ```
 
-Skaffold deploys all services — Postgres, Redis, the Rails app, and the full observability stack — and sets up port-forwards automatically.
+Skaffold deploys all services — Postgres, Redis, the Rails app, and the full observability stack — and sets up port-forwards automatically. The Rails app runs in-cluster with `OTEL_ENABLED=true` set in `charts/rails-app/values.yaml`, so traces flow to Jaeger out of the box. Prometheus scrapes the app's `/metrics` endpoint every 15s via the `ServiceMonitor` resource in `charts/rails-app/templates/service-monitor.yaml`.
 
-Then enable tracing in `.env`:
-
-```
-OTEL_ENABLED=true
-```
-
-Restart `bin/rails server`. Traces appear in Jaeger immediately; Prometheus scrapes metrics every 15s via the `ServiceMonitor` resource in `charts/rails-app/templates/service-monitor.yaml`.
+To turn tracing off, set `OTEL_ENABLED` to `false` in `charts/rails-app/values.yaml` and re-run `skaffold dev`.
 
 ## Services
 
