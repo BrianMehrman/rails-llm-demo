@@ -4,6 +4,8 @@
 **Branch:** `feature/fix-incluster-deploy` (worktree: `.claude/worktrees/agent-1780078421`, based on `origin/main`)
 **Trigger:** User reported "the instructions do not work" — `skaffold dev --port-forward` fails from a clean cluster.
 
+> **➜ START HERE NEXT SESSION:** Fix **bug #4** (add the `/up` health route in `config/routes.rb`) before anything else. It is the only thing blocking `rails-app` from becoming Ready now that bugs #1, #2, #3, #5 are fixed.
+
 ## Root meta-cause
 
 The **in-cluster production deployment has never run end-to-end.** Earlier work (and the merged blog-post-prep docs) assumed it worked. It doesn't — booting it surfaces one untested layer at a time. So far **four** stacked bugs, each a distinct root cause. Each fix reveals the next.
