@@ -4,6 +4,14 @@
 alertmanager:
   enabled: false
 
+# node-exporter cannot run on Docker Desktop: it wants to bind-mount the host `/`
+# as a shared/slave mount, which Docker Desktop's runtime forbids ("path / is
+# mounted on / but it is not a shared or slave mount"). It only collects host-level
+# metrics (CPU/disk/network) which are not part of this demo's app-level LLM signal,
+# so disable it.
+prometheus-node-exporter:
+  enabled: false
+
 grafana:
   adminPassword: admin
   service:
