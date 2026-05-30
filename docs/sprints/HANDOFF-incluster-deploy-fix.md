@@ -44,25 +44,29 @@ prometheus-node-exporter:
 ```
 **Verification:** on next `skaffold run`, no `prometheus-node-exporter` DaemonSet pod should be created.
 
-### 6. `fluent-bit` CrashLoopBackOff — NOT INVESTIGATED
-`fluent-bit-<hash>` (`charts/fluent-bit/values.yaml`) is in CrashLoopBackOff after deploy. Its logs show normal inotify-watch behavior on container log files, not a fatal startup error — suggesting a probe/config issue (probe failing or fluent-bit exiting cleanly on some condition that k8s interprets as crash). Not yet investigated. Likely candidates: a liveness/readiness probe targeting an endpoint Fluent Bit doesn't expose, or a Loki-output config rejecting its config on this Loki version.
+### 6. `fluent-bit` CrashLoopBackOff — FIXED, awaiting redeploy
+`fluent-bit-<hash>` (`charts/fluent-bit/values.yaml`) was in CrashLoopBackOff after deploy.
+**Root cause:** The fluent/fluent-bit chart v0.47.9 (Fluent Bit 3.1.7) ships a default liveness probe at `GET /api/v1/health` on port 2020. Our `[SERVICE]` block did not include `HTTP_Server On` / `HTTP_Port 2020`, so Fluent Bit never opened that port. The liveness probe timed out → k8s killed and restarted the pod on every cycle.
+**Fix:** Added `HTTP_Server On`, `HTTP_Listen 0.0.0.0`, `HTTP_Port 2020` to the `[SERVICE]` section in `charts/fluent-bit/values.yaml`.
+**Verification:** requires redeploy with `skaffold run`. Expect `fluent-bit-<hash>` pod to reach `Running` state.
 
 ## Commits on this branch
 - `3cd2637` fix(deploy): bugs #1, #2, #3
 - handoff doc commit
-- `<this commit>` fix(kps): disable node-exporter on Docker Desktop (bug #5)
+- `<prev commit>` fix(kps): disable node-exporter on Docker Desktop (bug #5)
+- `37d0a47` fix(routes): add /up health route so k8s probes don't 404 (bug #4)
+- `<this commit>` fix(fluent-bit): enable HTTP server for liveness probe (bug #6)
 **WIP — not yet PR'd.**
 
 ## Verification status
 - `helm template` for jaeger: clean. ✓
 - Full `skaffold run`: all 7 releases install (postgres, redis, kube-prometheus-stack, rails-app, loki, jaeger, fluent-bit). ✓
-- rails-app pod: boots, but CrashLoopBackOff due to bug #4 (`/up` probes). ✗
+- rails-app pod: bug #4 fixed (`/up` route added). Awaiting redeploy. ✗→✓ pending
+- fluent-bit pod: bug #6 fixed (HTTP_Server enabled). Awaiting redeploy. ✗→✓ pending
 
 ## Next steps (in order)
-1. Add the `/up` route (bug #4). Verify `bin/rails routes | grep up` shows it.
-2. Investigate fluent-bit CrashLoopBackOff (bug #6) — `kubectl describe pod -l app.kubernetes.io/name=fluent-bit` and `kubectl logs ds/fluent-bit --previous`.
-3. Redeploy: `skaffold run` (rebuilds image — `routes.rb` is baked in). Confirm `kubectl get pods` shows `rails-app 1/1 Running`, no `node-exporter` pod, and `fluent-bit` Running.
-4. Then verify the actual demo path (still untested):
+1. **➜ START HERE:** Redeploy: `skaffold run` (rebuilds image — `routes.rb` baked in). Confirm `kubectl get pods` shows `rails-app 1/1 Running`, `fluent-bit Running`, no `node-exporter` pod.
+2. Then verify the actual demo path (still untested):
    - App reachable at `http://localhost:3000` (needs `skaffold dev --port-forward`).
    - App reaches Ollama via `host.docker.internal:11434` — send a message, confirm a reply.
    - Traces reach Jaeger (`http://localhost:16686`), metrics in Prometheus, logs in Loki.
