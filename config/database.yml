@@ -29,6 +29,11 @@ development:
     database: chatbot_development_cable
     migrations_paths: db/cable_migrate
     url: <%= ENV["CABLE_DATABASE_URL"] %>
+  cache:
+    <<: *default
+    database: chatbot_development_cache
+    migrations_paths: db/cache_migrate
+    url: <%= ENV["CACHE_DATABASE_URL"] %>
 
 test:
   primary:
@@ -42,6 +47,10 @@ test:
     <<: *default
     database: chatbot_test_cable
     migrations_paths: db/cable_migrate
+  cache:
+    <<: *default
+    database: chatbot_test_cache
+    migrations_paths: db/cache_migrate
 
 production:
   primary:
@@ -55,3 +64,7 @@ production:
     <<: *default
     database: chatbot_production_cable
     migrations_paths: db/cable_migrate
+  cache:
+    <<: *default
+    database: chatbot_production_cache
+    migrations_paths: db/cache_migrate

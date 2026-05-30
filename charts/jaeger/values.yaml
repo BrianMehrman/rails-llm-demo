@@ -13,24 +13,23 @@ allInOne:
     tag: latest
   args:
     - "--memory.max-traces=10000"
-  extraEnv:
-    - name: COLLECTOR_OTLP_ENABLED
-      value: "true"
+  # COLLECTOR_OTLP_ENABLED is injected automatically by the chart in all-in-one
+  # mode — setting it again here produces a duplicate env key and an invalid
+  # Deployment patch, so do not re-add it.
 
 storage:
   type: memory
 
+# All-in-one mode already renders jaeger-collector (OTLP http 4318, grpc 4317)
+# and jaeger-query (16686) services pointing at the all-in-one pod. The separate
+# production components default to enabled and would render a SECOND, name-colliding
+# set of collector/query services (one with an unnamed OTLP-grpc port), which fails
+# to install. Disable them so only the all-in-one services remain.
 collector:
-  service:
-    otlp:
-      http:
-        name: otlp-http
-        port: 4318
+  enabled: false
 
 query:
-  service:
-    type: ClusterIP
-    port: 16686
+  enabled: false
 
 agent:
   enabled: false

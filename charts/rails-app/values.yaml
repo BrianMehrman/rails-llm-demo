@@ -21,6 +21,7 @@ env:
   DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development
   QUEUE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_queue
   CABLE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_cable
+  CACHE_DATABASE_URL: postgresql://postgres:password@postgres:5432/chatbot_development_cache
   # LLM endpoint — the app reads OPENAI_API_BASE (app/services/llm_client.rb).
   # host.docker.internal reaches Ollama running on the host from inside the cluster.
   OPENAI_API_BASE: http://host.docker.internal:11434/v1

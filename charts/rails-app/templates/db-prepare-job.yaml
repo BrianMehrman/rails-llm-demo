@@ -1,0 +1,45 @@
+{{- /*
+Run-once schema preparation.
+
+A Helm pre-install/pre-upgrade hook Job runs exactly ONCE per release, regardless
+of replicaCount, and Helm blocks the rest of the rollout until it completes. This
+is deliberately a Job and not a per-pod initContainer: with more than one web
+replica, per-pod `db:prepare` would run concurrently and race on CREATE/migrate.
+"An array of many is the same as an array of one" — design the single instance as
+an example of the many. A failed migration here fails the deploy (Init/release
+error) instead of crash-looping half-migrated app pods.
+
+Env is rendered from the same `.Values.env` map the ConfigMap uses (one source of
+truth) rather than via envFrom, because pre-install hooks run before the normal
+ConfigMap resource is created, so it would not yet exist for the Job to reference.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "rails-app.fullname" . }}-db-prepare
+  labels:
+    {{- include "rails-app.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # Tolerate postgres not being Ready the instant the hook fires; each retry is a
+  # fresh pod. skaffold deploys the postgres release first, so this is a safety net.
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "rails-app.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-prepare
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["bin/rails", "db:prepare"]
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}

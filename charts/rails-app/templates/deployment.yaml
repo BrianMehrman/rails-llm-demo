@@ -14,6 +14,9 @@ spec:
       labels:
         {{- include "rails-app.selectorLabels" . | nindent 8 }}
     spec:
+      # Schema prep runs once per release in the db-prepare hook Job
+      # (templates/db-prepare-job.yaml), not per-pod, so multiple replicas never
+      # race on migrations. By the time these pods start, the schema is ready.
       containers:
         - name: rails-app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

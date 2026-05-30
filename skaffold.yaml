@@ -23,6 +23,18 @@ deploy:
           - charts/redis/values.yaml
         namespace: default
         createNamespace: true
+      # kube-prometheus-stack must deploy before rails-app: it installs the
+      # monitoring.coreos.com CRDs that rails-app's ServiceMonitor depends on.
+      # Releases deploy in list order, so reordering this below rails-app
+      # breaks a clean-cluster `skaffold dev` with "no matches for kind ServiceMonitor".
+      - name: kube-prometheus-stack
+        remoteChart: kube-prometheus-stack
+        repo: https://prometheus-community.github.io/helm-charts
+        version: "65.1.1"
+        valuesFiles:
+          - charts/kube-prometheus-stack/values.yaml
+        namespace: default
+        createNamespace: true
       - name: rails-app
         chartPath: charts/rails-app
         valuesFiles:
@@ -32,14 +44,6 @@ deploy:
         setValueTemplates:
           image.repository: "{{.IMAGE_REPO_rails_app}}"
           image.tag: "{{.IMAGE_TAG_rails_app}}"
-      - name: kube-prometheus-stack
-        remoteChart: kube-prometheus-stack
-        repo: https://prometheus-community.github.io/helm-charts
-        version: "65.1.1"
-        valuesFiles:
-          - charts/kube-prometheus-stack/values.yaml
-        namespace: default
-        createNamespace: true
       - name: loki
         remoteChart: loki
         repo: https://grafana.github.io/helm-charts

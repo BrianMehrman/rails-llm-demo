@@ -10,8 +10,8 @@ set -euo pipefail
 #
 # What it does:
 #   1. Removes the hostPath data directory used by the Kubernetes Postgres pod
-#      (/tmp/postgres-rails/postgres). Postgres refuses to init over a non-empty
-#      directory, so this clears the slate.
+#      (/tmp/rails-llm-demo/postgres — must match charts/postgres/values.yaml).
+#      Postgres refuses to init over a non-empty directory, so this clears the slate.
 #   2. Restarts the Postgres Helm release so the pod reinitialises cleanly.
 #   3. Runs db:reset (drop + create + schema:load + db:seed) via Rails.
 #
@@ -19,17 +19,17 @@ set -euo pipefail
 #   - kubectl configured and pointing at your local cluster (Docker Desktop / k3d)
 #   - skaffold dev --port-forward already running (or you run it after this script)
 
-HOSTPATH="/tmp/postgres-rails/postgres"
+HOSTPATH="/tmp/rails-llm-demo/postgres"
 RELEASE="postgres"
 NAMESPACE="default"
 
 echo "==> Removing hostPath data at ${HOSTPATH}"
 rm -rf "${HOSTPATH}"
 
-echo "==> Restarting Postgres Helm release (${RELEASE})"
-kubectl rollout restart statefulset -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${RELEASE}" \
-  -n "${NAMESPACE}" 2>/dev/null || \
-kubectl rollout restart statefulset -l "app=${RELEASE}" \
+echo "==> Restarting Postgres StatefulSet (${RELEASE})"
+# Chart labels are app.kubernetes.io/name=postgres (the chart name), instance=<release>.
+kubectl rollout restart statefulset \
+  -l "app.kubernetes.io/name=postgres,app.kubernetes.io/instance=${RELEASE}" \
   -n "${NAMESPACE}" 2>/dev/null || \
 helm upgrade --install "${RELEASE}" charts/postgres \
   --values charts/postgres/values.yaml \
@@ -38,12 +38,7 @@ helm upgrade --install "${RELEASE}" charts/postgres \
 
 echo "==> Waiting for Postgres to be ready..."
 kubectl wait pod \
-  -l "app.kubernetes.io/name=postgresql" \
-  -n "${NAMESPACE}" \
-  --for=condition=Ready \
-  --timeout=60s 2>/dev/null || \
-kubectl wait pod \
-  -l "app=${RELEASE}" \
+  -l "app.kubernetes.io/name=postgres,app.kubernetes.io/instance=${RELEASE}" \
   -n "${NAMESPACE}" \
   --for=condition=Ready \
   --timeout=60s
