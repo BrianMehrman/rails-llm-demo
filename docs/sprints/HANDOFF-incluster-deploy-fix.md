@@ -65,10 +65,11 @@ On a fresh `skaffold run`, `postgres-0` CrashLoopBackOff: `initdb: error: direct
 **Fix:** use `Time.now.utc.iso8601(3)` (emit-time wall clock; precise span timing is carried by trace_id/span_id in `custom_payload`). Format still matches the Fluent Bit `rails_json` parser.
 **Verification:** baked into the image — confirm after `skaffold run` that rails-app logs no longer show the lograge error.
 
-### 9. App schema never loaded → `relation "chats" does not exist` (500) — FIXED, awaiting redeploy
-The rails-app pod reached `Running` (because `/up` doesn't touch the DB), but `GET /` returned 500: `PG::UndefinedTable: relation "chats" does not exist`. Nothing in the deploy created the queue/cable/cache databases or loaded any schema — there was no migration job, initContainer, or `db:prepare` step. `POSTGRES_DB` only creates the primary `chatbot_development` database, empty.
-**Fix:** added a `db-prepare` initContainer to `charts/rails-app/templates/deployment.yaml` that runs `bin/rails db:prepare` (same image + envFrom configmap) before the app container. `db:prepare` is idempotent: creates all four databases + loads schema on first run, applies pending migrations thereafter.
-**Verified:** ran `kubectl exec deploy/rails-app -- bin/rails db:prepare` against the live pod (created `chatbot_development_queue/_cable/_cache`, loaded schemas); `GET /` then returned **200**. The initContainer makes this automatic on the next deploy.
+### 9. App schema never loaded → `relation "chats" does not exist` (500) — FIXED & VERIFIED
+The rails-app pod reached `Running` (because `/up` doesn't touch the DB), but `GET /` returned 500: `PG::UndefinedTable: relation "chats" does not exist`. Nothing in the deploy created the queue/cable/cache databases or loaded any schema. `POSTGRES_DB` only creates the primary `chatbot_development` database, empty.
+**True root cause:** a prior design doc (`docs/specs/2026-05-25-blog-post-prep-design.md:55`) *claimed* `bin/docker-entrypoint` runs `db:prepare` automatically on boot. It never did — the guard `[ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]` only matches a bare `./bin/rails server`, but the real CMD ends in `-b 0.0.0.0 -p 3000`, so the branch was dead code. Documented-as-working, never run.
+**Fix (run-once, replica-safe):** schema prep now runs in a **Helm `pre-install`/`pre-upgrade` hook Job** (`charts/rails-app/templates/db-prepare-job.yaml`), NOT per-pod. Helm blocks the rollout until the Job completes, so the app pods start with the schema already present. Critically this runs **exactly once per release regardless of `replicaCount`** — a per-pod initContainer (the first attempt) would have multiple web replicas racing `CREATE`/migrate. "An array of many is the same as an array of one": multi-instance is on the roadmap, so the single instance is designed as an example of the many. The Job's env is rendered from the same `.Values.env` map as the ConfigMap (one source of truth); it can't use `envFrom` because pre-install hooks run before the normal ConfigMap exists. The dead `db:prepare` branch in `bin/docker-entrypoint` was removed.
+**Verified from scratch:** cleared postgres, `skaffold run` → `rails-app-db-prepare` Job `Complete 1/1` (created `chatbot_development_queue/_cable/_cache`), app pod started after it, `GET /` → **200**, lograge errors: 0.
 
 ## Commits on this branch
 - `3cd2637` fix(deploy): bugs #1, #2, #3
@@ -76,7 +77,8 @@ The rails-app pod reached `Running` (because `/up` doesn't touch the DB), but `G
 - `<prev commit>` fix(kps): disable node-exporter on Docker Desktop (bug #5, first/wrong attempt)
 - `37d0a47` fix(routes): add /up health route so k8s probes don't 404 (bug #4)
 - `1a35f53` fix(fluent-bit): enable HTTP server for liveness probe (bug #6)
-- `<this commit>` fix(deploy): postgres reset path/labels, node-exporter key, lograge, db:prepare initContainer (bugs #5 re-fix, #7, #8, #9)
+- `68ce9da` fix(deploy): node-exporter key, postgres reset, lograge, db:prepare initContainer (bugs #5 re-fix, #7, #8, #9)
+- `<this commit>` refactor(deploy): run db:prepare once per release via Helm hook Job instead of per-pod (replica-safe); remove dead entrypoint branch
 **WIP — not yet PR'd.**
 
 ## Verification status

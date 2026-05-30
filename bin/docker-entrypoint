@@ -1,8 +1,12 @@
 #!/bin/bash -e
 
-# If running the rails server then create or migrate existing database
-if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
-  ./bin/rails db:prepare
-fi
+# Schema preparation is NOT done here. It runs exactly once per release in the
+# in-cluster `db-prepare` Helm hook Job (charts/rails-app/templates/db-prepare-job.yaml)
+# so that multiple web replicas never race on migrations. (The previous guard here
+# only matched a bare `./bin/rails server` and never fired against the real CMD,
+# which passes `-b 0.0.0.0 -p 3000` — it was dead code.)
+#
+# NOTE: the Kamal production path uses this same entrypoint and currently has no
+# migration step of its own — wire one into a Kamal pre-deploy hook if/when needed.
 
 exec "${@}"

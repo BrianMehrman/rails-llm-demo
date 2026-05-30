@@ -14,19 +14,9 @@ spec:
       labels:
         {{- include "rails-app.selectorLabels" . | nindent 8 }}
     spec:
-      initContainers:
-        # Create the primary/queue/cable/cache databases and load their schemas
-        # before the app boots. db:prepare is idempotent — it loads the schema on
-        # first run and applies any pending migrations on subsequent deploys, so it
-        # is safe to run on every rollout. Without this the app 500s on the first
-        # DB-backed request ("relation \"chats\" does not exist").
-        - name: db-prepare
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["bin/rails", "db:prepare"]
-          envFrom:
-            - configMapRef:
-                name: {{ include "rails-app.fullname" . }}-env
+      # Schema prep runs once per release in the db-prepare hook Job
+      # (templates/db-prepare-job.yaml), not per-pod, so multiple replicas never
+      # race on migrations. By the time these pods start, the schema is ready.
       containers:
         - name: rails-app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
