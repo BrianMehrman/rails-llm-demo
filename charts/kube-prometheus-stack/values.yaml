@@ -9,7 +9,12 @@ alertmanager:
 # mounted on / but it is not a shared or slave mount"). It only collects host-level
 # metrics (CPU/disk/network) which are not part of this demo's app-level LLM signal,
 # so disable it.
-prometheus-node-exporter:
+#
+# NOTE: the gate is the top-level `nodeExporter.enabled` key — that is the condition
+# on the prometheus-node-exporter subchart dependency in kube-prometheus-stack's
+# Chart.yaml. Setting `prometheus-node-exporter.enabled: false` only configures the
+# subchart and does NOT prevent it from being deployed.
+nodeExporter:
   enabled: false
 
 grafana:
