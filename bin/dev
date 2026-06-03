@@ -1,2 +1,81 @@
-#!/usr/bin/env ruby
-exec "./bin/rails", "server", *ARGV
+#!/usr/bin/env bash
+set -euo pipefail
+
+# bin/dev — start the full rails-llm-demo stack for this worktree.
+#
+# Reads SLOT, RAILS_PORT, and K8S_CONTEXT from .env, selects the correct
+# Skaffold config file, and manages both processes. Ctrl-C kills both cleanly.
+#
+# First-time setup: run bin/use-slot 1 (or N for parallel worktrees) to
+# generate .env before using this script.
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="$REPO_ROOT/.env"
+
+# ---------------------------------------------------------------------------
+# Load .env
+# ---------------------------------------------------------------------------
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: No .env found. Run 'bin/use-slot 1' first." >&2
+  exit 1
+fi
+
+# Source the .env file, ignoring comment lines
+set -o allexport
+# shellcheck disable=SC1090
+while IFS= read -r line; do
+  [[ "$line" =~ ^[[:space:]]*# ]] && continue
+  [[ -z "${line// }" ]] && continue
+  export "$line" 2>/dev/null || true
+done < "$ENV_FILE"
+set +o allexport
+
+SLOT="${SLOT:-1}"
+RAILS_PORT="${RAILS_PORT:-3000}"
+K8S_CONTEXT="${K8S_CONTEXT:-}"
+
+# ---------------------------------------------------------------------------
+# Select Skaffold config
+# ---------------------------------------------------------------------------
+
+if [ "$SLOT" -eq 1 ]; then
+  SKAFFOLD_FILE="$REPO_ROOT/skaffold.yaml"
+else
+  SKAFFOLD_FILE="$REPO_ROOT/.skaffold/slot-${SLOT}.yaml"
+fi
+
+if [ ! -f "$SKAFFOLD_FILE" ]; then
+  echo "ERROR: Skaffold config not found: $SKAFFOLD_FILE" >&2
+  echo "       Run 'bin/use-slot ${SLOT}' to generate it." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Build skaffold command
+# ---------------------------------------------------------------------------
+
+SKAFFOLD_CMD=(skaffold dev --filename "$SKAFFOLD_FILE")
+
+if [ -n "$K8S_CONTEXT" ]; then
+  SKAFFOLD_CMD+=(--kube-context "$K8S_CONTEXT")
+fi
+
+# ---------------------------------------------------------------------------
+# Start processes
+# ---------------------------------------------------------------------------
+
+echo "Starting slot ${SLOT} (Rails on :${RAILS_PORT}, Skaffold: $(basename "$SKAFFOLD_FILE"))"
+echo ""
+
+# Skaffold resolves `requires.path`, `chartPath`, and `valuesFiles` relative to
+# the current working directory, so always invoke it from the repo root.
+cd "$REPO_ROOT"
+
+"${SKAFFOLD_CMD[@]}" &
+SKAFFOLD_PID=$!
+
+# Kill Skaffold when this script exits for any reason
+trap 'echo "Shutting down..."; kill "$SKAFFOLD_PID" 2>/dev/null; wait "$SKAFFOLD_PID" 2>/dev/null || true' EXIT INT TERM
+
+exec "$REPO_ROOT/bin/rails" server -p "$RAILS_PORT" -b 0.0.0.0

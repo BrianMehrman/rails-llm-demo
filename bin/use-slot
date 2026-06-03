@@ -1,0 +1,374 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# bin/use-slot N [--force]
+#
+# Configures this worktree to run as slot N of the rails-llm-demo stack.
+# Resolves ports using a +20 offset heuristic, checks availability, writes
+# resolved values to .env, and (for N > 1) generates .skaffold/slot-N.yaml.
+#
+# Usage:
+#   bin/use-slot 1          # configure as slot 1 (default, no Skaffold file generated)
+#   bin/use-slot 2          # configure as slot 2
+#   bin/use-slot 2 --force  # recompute even if slot 2 is already configured
+
+require "socket"
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+OFFSET = 20
+
+BASE_PORTS = {
+  rails:        3000,
+  grafana:      3001,
+  loki:         3100,
+  otel:         4318,
+  postgres:     5432,
+  redis:        6379,
+  prometheus:   9090,
+  jaeger_ui:    16686
+}.freeze
+
+MAX_NUDGE_ATTEMPTS = 10
+
+SKAFFOLD_API_VERSION = "skaffold/v4beta11"
+
+# Helm chart versions — keep in sync with skaffold.yaml
+CHART_VERSIONS = {
+  kube_prometheus_stack: "65.1.1",
+  loki:                  "6.18.0",
+  jaeger:                "3.3.1",
+  fluent_bit:            "0.47.9"
+}.freeze
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+slot = ARGV.find { |a| a =~ /\A\d+\z/ }&.to_i
+force = ARGV.include?("--force")
+
+unless slot && slot >= 1
+  warn "Usage: bin/use-slot N [--force]  (N >= 1)"
+  exit 1
+end
+
+env_file = File.join(__dir__, "..", ".env")
+env_file = File.expand_path(env_file)
+skaffold_dir = File.join(__dir__, "..", ".skaffold")
+skaffold_dir = File.expand_path(skaffold_dir)
+skaffold_file = File.join(skaffold_dir, "slot-#{slot}.yaml")
+
+# ---------------------------------------------------------------------------
+# Port availability checking (three-tier)
+# ---------------------------------------------------------------------------
+
+def port_in_use?(port)
+  # Tier 1: lsof (macOS + most Linux)
+  if system("command -v lsof > /dev/null 2>&1")
+    result = `lsof -i :#{port} -sTCP:LISTEN -t 2>/dev/null`.strip
+    return !result.empty?
+  end
+
+  # Tier 2: ss (Linux iproute2)
+  if system("command -v ss > /dev/null 2>&1")
+    return system("ss -tlnp 2>/dev/null | grep -q ':#{port} '")
+  end
+
+  # Tier 3: Ruby TCPServer bind attempt
+  begin
+    server = TCPServer.new("127.0.0.1", port)
+    server.close
+    false
+  rescue Errno::EADDRINUSE
+    true
+  end
+end
+
+def resolve_port(service, candidate)
+  MAX_NUDGE_ATTEMPTS.times do |i|
+    port = candidate + i
+    unless port_in_use?(port)
+      nudged = i > 0
+      return [ port, nudged, candidate ]
+    end
+  end
+
+  warn "ERROR: Could not find a free port for #{service} " \
+       "(tried #{candidate}..#{candidate + MAX_NUDGE_ATTEMPTS - 1})"
+  exit 1
+end
+
+# ---------------------------------------------------------------------------
+# .env read/write helpers
+# ---------------------------------------------------------------------------
+
+def read_env(path)
+  return {} unless File.exist?(path)
+
+  File.readlines(path, chomp: true).each_with_object({}) do |line, hash|
+    next if line.strip.empty? || line.strip.start_with?("#")
+
+    key, value = line.split("=", 2)
+    hash[key.strip] = value&.strip if key
+  end
+end
+
+def write_env(path, values, existing)
+  # Preserve keys the script doesn't own
+  owned_keys = %w[
+    SLOT RAILS_PORT GRAFANA_PORT LOKI_PORT OTEL_PORT DB_PORT REDIS_PORT
+    PROMETHEUS_PORT JAEGER_UI_PORT REDIS_URL OTEL_EXPORTER_OTLP_ENDPOINT
+    K8S_CONTEXT
+  ]
+  preserved = existing.reject { |k, _| owned_keys.include?(k) }
+
+  lines = []
+  lines << "# Slot configuration — managed by bin/use-slot. Do not edit port values manually."
+  lines << "SLOT=#{values[:slot]}"
+  lines << ""
+  lines << "# Port assignments resolved by bin/use-slot #{values[:slot]}"
+  lines << "RAILS_PORT=#{values[:rails]}"
+  lines << "GRAFANA_PORT=#{values[:grafana]}"
+  lines << "LOKI_PORT=#{values[:loki]}"
+  lines << "OTEL_PORT=#{values[:otel]}"
+  lines << "DB_PORT=#{values[:postgres]}"
+  lines << "REDIS_PORT=#{values[:redis]}"
+  lines << "PROMETHEUS_PORT=#{values[:prometheus]}"
+  lines << "JAEGER_UI_PORT=#{values[:jaeger_ui]}"
+  lines << ""
+  lines << "# Full URLs constructed from port assignments above"
+  lines << "REDIS_URL=redis://localhost:#{values[:redis]}/0"
+  lines << "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:#{values[:otel]}"
+  lines << ""
+  lines << "# Kubernetes context pinned at slot setup time"
+  lines << "K8S_CONTEXT=#{values[:k8s_context]}"
+
+  unless preserved.empty?
+    lines << ""
+    lines << "# Project configuration (preserved from previous .env)"
+    preserved.each { |k, v| lines << "#{k}=#{v}" }
+  end
+
+  File.write(path, lines.join("\n") + "\n")
+end
+
+# ---------------------------------------------------------------------------
+# Skaffold YAML generation
+# ---------------------------------------------------------------------------
+
+def generate_skaffold_yaml(slot, ports)
+  ns = "slot-#{slot}"
+  <<~YAML
+    apiVersion: #{SKAFFOLD_API_VERSION}
+    kind: Config
+    # Generated by bin/use-slot #{slot} — do not edit manually.
+    # Re-generate with: bin/use-slot #{slot} --force
+    #
+    # `requires.path`, `chartPath`, and `valuesFiles` are resolved relative to the
+    # current working directory, NOT to this file. bin/dev cd's to the repo root
+    # before invoking skaffold, so these must stay repo-root-relative.
+    requires:
+      - path: skaffold.yaml
+
+    portForward:
+      - resourceType: service
+        resourceName: postgres
+        namespace: #{ns}
+        port: 5432
+        localPort: #{ports[:postgres]}
+      - resourceType: service
+        resourceName: redis
+        namespace: #{ns}
+        port: 6379
+        localPort: #{ports[:redis]}
+      - resourceType: service
+        resourceName: rails-app
+        namespace: #{ns}
+        port: 3000
+        localPort: #{ports[:rails]}
+      - resourceType: service
+        resourceName: kube-prometheus-stack-grafana
+        namespace: #{ns}
+        port: 80
+        localPort: #{ports[:grafana]}
+      - resourceType: service
+        resourceName: kube-prometheus-stack-prometheus
+        namespace: #{ns}
+        port: 9090
+        localPort: #{ports[:prometheus]}
+      - resourceType: service
+        resourceName: loki
+        namespace: #{ns}
+        port: 3100
+        localPort: #{ports[:loki]}
+      - resourceType: service
+        resourceName: jaeger-query
+        namespace: #{ns}
+        port: 16686
+        localPort: #{ports[:jaeger_ui]}
+      - resourceType: service
+        resourceName: jaeger-collector
+        namespace: #{ns}
+        port: 4318
+        localPort: #{ports[:otel]}
+
+    deploy:
+      helm:
+        releases:
+          - name: postgres
+            chartPath: charts/postgres
+            valuesFiles:
+              - charts/postgres/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+            setValues:
+              storage.hostPath: /tmp/rails-llm-demo/postgres-slot-#{slot}
+          - name: redis
+            chartPath: charts/redis
+            valuesFiles:
+              - charts/redis/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+          - name: kube-prometheus-stack
+            remoteChart: kube-prometheus-stack
+            repo: https://prometheus-community.github.io/helm-charts
+            version: "#{CHART_VERSIONS[:kube_prometheus_stack]}"
+            valuesFiles:
+              - charts/kube-prometheus-stack/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+          - name: rails-app
+            chartPath: charts/rails-app
+            valuesFiles:
+              - charts/rails-app/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+            setValueTemplates:
+              image.repository: "{{.IMAGE_REPO_rails_app}}"
+              image.tag: "{{.IMAGE_TAG_rails_app}}"
+          - name: loki
+            remoteChart: loki
+            repo: https://grafana.github.io/helm-charts
+            version: "#{CHART_VERSIONS[:loki]}"
+            valuesFiles:
+              - charts/loki/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+          - name: jaeger
+            remoteChart: jaeger
+            repo: https://jaegertracing.github.io/helm-charts
+            version: "#{CHART_VERSIONS[:jaeger]}"
+            valuesFiles:
+              - charts/jaeger/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+          - name: fluent-bit
+            remoteChart: fluent-bit
+            repo: https://fluent.github.io/helm-charts
+            version: "#{CHART_VERSIONS[:fluent_bit]}"
+            valuesFiles:
+              - charts/fluent-bit/values.yaml
+            namespace: #{ns}
+            createNamespace: true
+  YAML
+end
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+existing_env = read_env(env_file)
+existing_slot = existing_env["SLOT"]&.to_i
+
+# Idempotency check
+if !force && existing_slot == slot
+  puts "Slot #{slot} already configured. Use --force to recompute."
+  exit 0
+end
+
+# Conflict guard
+if !force && existing_slot && existing_slot != slot
+  print "This worktree is configured for slot #{existing_slot}. Overwrite with slot #{slot}? [y/N] "
+  answer = $stdin.gets&.strip&.downcase
+  unless answer == "y"
+    puts "Aborted."
+    exit 0
+  end
+end
+
+# Resolve K8S_CONTEXT
+unless system("command -v kubectl > /dev/null 2>&1")
+  warn "ERROR: kubectl not found. Install kubectl and ensure a cluster context is active."
+  exit 1
+end
+k8s_context = `kubectl config current-context 2>/dev/null`.strip
+if k8s_context.empty?
+  warn "ERROR: No active kubectl context. Run 'kubectl config use-context <name>' first."
+  exit 1
+end
+
+# Resolve ports
+puts "Resolving ports for slot #{slot}..."
+resolved = {}
+nudge_notes = {}
+
+BASE_PORTS.each do |service, base|
+  candidate = base + (slot - 1) * OFFSET
+  port, nudged, original = resolve_port(service, candidate)
+  resolved[service] = port
+  nudge_notes[service] = original if nudged
+end
+
+# Write .env
+values = resolved.merge(slot: slot, k8s_context: k8s_context)
+write_env(env_file, values, existing_env)
+
+# Generate .skaffold/slot-N.yaml (slot 1 uses skaffold.yaml directly)
+if slot > 1
+  Dir.mkdir(skaffold_dir) unless Dir.exist?(skaffold_dir)
+  File.write(skaffold_file, generate_skaffold_yaml(slot, resolved))
+end
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+puts ""
+puts "Slot #{slot} configured."
+puts ""
+
+width = BASE_PORTS.keys.map { |k| k.to_s.length }.max
+BASE_PORTS.each_key do |service|
+  port = resolved[service]
+  var  = case service
+  when :rails      then "RAILS_PORT"
+  when :grafana    then "GRAFANA_PORT"
+  when :loki       then "LOKI_PORT"
+  when :otel       then "OTEL_PORT"
+  when :postgres   then "DB_PORT"
+  when :redis      then "REDIS_PORT"
+  when :prometheus then "PROMETHEUS_PORT"
+  when :jaeger_ui  then "JAEGER_UI_PORT"
+  end
+  note = nudge_notes.key?(service) ? "  (nudged — #{nudge_notes[service]} was in use)" : ""
+  suffix = service == :rails ? "  → http://localhost:#{port}" : ""
+  puts "  #{var}=#{port}#{suffix}#{note}"
+end
+
+puts ""
+puts "  K8S_CONTEXT=#{k8s_context}"
+
+if slot > 1
+  puts ""
+  puts "  Skaffold config: .skaffold/slot-#{slot}.yaml"
+end
+
+puts ""
+puts "Start the stack:"
+puts "  bin/dev"
+puts ""
+puts "Force recompute:"
+puts "  bin/use-slot #{slot} --force"

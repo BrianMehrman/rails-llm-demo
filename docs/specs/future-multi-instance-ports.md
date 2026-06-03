@@ -1,6 +1,10 @@
+> **Superseded.** See `parallel-slot-port-management.md` and
+> `parallel-slot-port-management-implementation-plan.md` for the implemented design.
+> Do not act on the proposals in this document.
+
 # Future Sprint: Multi-Instance Port Configurability
 
-**Status:** Proposed (not scheduled)
+**Status:** Superseded — implemented as parallel slot port management.
 **Origin:** Surfaced during blog-post-prep journey audit (see `2026-05-25-blog-post-prep-design.md`).
 
 ## Problem
