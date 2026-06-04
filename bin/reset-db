@@ -1,50 +1,112 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reset the development database.
+# Reset the shared development Postgres to a clean, freshly-initialized state.
 #
 # Use this when:
 #   - The Postgres pod fails with "initdb: error: directory exists but is not empty"
-#   - You want a clean schema + seed state during local development
-#   - After pulling migrations that conflict with your local data
+#   - Postgres data has become corrupt / half-initialized
+#   - You want a clean slate during local development
+#
+# Why a Kubernetes Job instead of a host-side `rm -rf`:
+#   Postgres stores its data on a hostPath that lives INSIDE the cluster node
+#   (the Docker Desktop / k3d / minikube VM), NOT on your Mac's filesystem.
+#   A host-side `rm -rf /tmp/...` clears a directory the pod never sees, so the
+#   stale data survives and the pod keeps failing. This script removes the data
+#   from inside the cluster via a one-off Job, which works the same on every
+#   local cluster.
 #
 # What it does:
-#   1. Removes the hostPath data directory used by the Kubernetes Postgres pod
-#      (/tmp/rails-llm-demo/postgres — must match charts/postgres/values.yaml).
-#      Postgres refuses to init over a non-empty directory, so this clears the slate.
-#   2. Restarts the Postgres Helm release so the pod reinitialises cleanly.
-#   3. Runs db:reset (drop + create + schema:load + db:seed) via Rails.
+#   1. Scales the Postgres StatefulSet to 0 so nothing holds the data dir open.
+#   2. Runs a Job that mounts the hostPath and deletes the data directory.
+#   3. Scales Postgres back up; it reinitialises over the now-empty directory.
+#      (Scaling, rather than deleting, preserves the Service — including its
+#      LoadBalancer type — so localhost access keeps working.)
+#   4. Recreates THIS worktree's databases (db:prepare) so it is ready to use.
 #
-# Prerequisites:
-#   - kubectl configured and pointing at your local cluster (Docker Desktop / k3d)
-#   - skaffold dev --port-forward already running (or you run it after this script)
+# Prerequisites: kubectl pointing at your local cluster, with the shared deps
+# deployed (bin/dev, or skaffold run -f skaffold.deps.yaml).
 
-HOSTPATH="/tmp/rails-llm-demo/postgres"
+NAMESPACE="${NAMESPACE:-default}"
 RELEASE="postgres"
-NAMESPACE="default"
+# Must match charts/postgres/values.yaml (storage.hostPath). Override if needed.
+HOSTPATH="${POSTGRES_HOSTPATH:-/tmp/rails-llm-demo/postgres}"
+PARENT="$(dirname "$HOSTPATH")"
+LEAF="$(basename "$HOSTPATH")"
+JOB="postgres-data-reset"
 
-echo "==> Removing hostPath data at ${HOSTPATH}"
-rm -rf "${HOSTPATH}"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
 
-echo "==> Restarting Postgres StatefulSet (${RELEASE})"
-# Chart labels are app.kubernetes.io/name=postgres (the chart name), instance=<release>.
-kubectl rollout restart statefulset \
-  -l "app.kubernetes.io/name=postgres,app.kubernetes.io/instance=${RELEASE}" \
-  -n "${NAMESPACE}" 2>/dev/null || \
-helm upgrade --install "${RELEASE}" charts/postgres \
-  --values charts/postgres/values.yaml \
-  --namespace "${NAMESPACE}" \
-  --wait
+sts="$(kubectl get statefulset "$RELEASE" -n "$NAMESPACE" --ignore-not-found -o name)"
 
-echo "==> Waiting for Postgres to be ready..."
+if [ -n "$sts" ]; then
+  echo "==> Scaling Postgres down to release its data volume"
+  kubectl scale statefulset "$RELEASE" -n "$NAMESPACE" --replicas=0
+  kubectl wait --for=delete "pod/${RELEASE}-0" -n "$NAMESPACE" --timeout=90s 2>/dev/null || true
+else
+  echo "==> Postgres StatefulSet not found; clearing any orphaned data only."
+fi
+
+echo "==> Wiping Postgres data dir (${HOSTPATH}) from inside the cluster"
+kubectl delete job "$JOB" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+kubectl apply -n "$NAMESPACE" -f - <<YAML
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB}
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: wipe
+          image: busybox:1.36
+          command: ["sh", "-c", "rm -rf '/host/${LEAF}' && echo 'wiped ${HOSTPATH}'"]
+          volumeMounts:
+            - name: host
+              mountPath: /host
+      volumes:
+        - name: host
+          hostPath:
+            path: ${PARENT}
+            type: DirectoryOrCreate
+YAML
+
+kubectl wait --for=condition=complete "job/${JOB}" -n "$NAMESPACE" --timeout=120s
+kubectl logs "job/${JOB}" -n "$NAMESPACE" 2>/dev/null || true
+kubectl delete job "$JOB" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+
+if [ -z "$sts" ]; then
+  echo ""
+  echo "Data cleared. Start Postgres with: bin/dev  (or skaffold run -f skaffold.deps.yaml)"
+  exit 0
+fi
+
+echo "==> Scaling Postgres back up (reinitialises over the empty dir)"
+kubectl scale statefulset "$RELEASE" -n "$NAMESPACE" --replicas=1
+kubectl rollout status "statefulset/${RELEASE}" -n "$NAMESPACE" --timeout=120s
 kubectl wait pod \
   -l "app.kubernetes.io/name=postgres,app.kubernetes.io/instance=${RELEASE}" \
-  -n "${NAMESPACE}" \
-  --for=condition=Ready \
-  --timeout=60s
+  -n "$NAMESPACE" --for=condition=Ready --timeout=120s
 
-echo "==> Resetting Rails database (drop + create + schema:load + seed)"
-bin/rails db:reset
+echo "==> Recreating this worktree's databases (db:prepare)"
+# Load .env (DB creds / overrides) if present, then resolve this worktree's slot
+# so the correct (slot-suffixed) databases are recreated.
+if [ -f .env ]; then
+  set -o allexport
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    export "$line" 2>/dev/null || true
+  done < .env
+  set +o allexport
+fi
+export DB_HOST="${DB_HOST:-localhost}" DB_PORT="${DB_PORT:-5432}"
+export DB_USERNAME="${DB_USERNAME:-postgres}" DB_PASSWORD="${DB_PASSWORD:-password}"
+eval "$(ruby bin/use-slot --env)"
+bin/rails db:prepare
 
 echo ""
-echo "Done. Database is reset and ready."
+echo "Done. Postgres is reset and this worktree's databases are ready."
