@@ -151,10 +151,13 @@ Live end-to-end test on docker-desktop — **passed**:
 Notes:
 - The shared `auth.password` is `password` (chart) — auth confirmed over TCP. `.env.example`
   was corrected to match.
-- Observed gotcha: on this docker-desktop, the postgres hostPath persists inside the VM,
-  so `bin/reset-db`'s host-side `rm -rf /tmp/...` does not fully wipe it. Not a blocker
-  (`db:prepare` creates the per-slot databases regardless), but `bin/reset-db` may warrant
-  a follow-up.
+- **docker-desktop hostPath cache (important):** the postgres data lives on a hostPath
+  inside the cluster VM, and docker-desktop's VirtioFS cache *resurrects deleted contents*
+  when a new pod mounts the path. Deleting `pgdata` — from the host OR an in-cluster Job —
+  does NOT give postgres a clean slate; it scales back up with the old cluster (verified:
+  a fresh pod saw the dir gone, yet postgres re-materialized it on start). `bin/reset-db`
+  was therefore rewritten to reset via SQL (drop + recreate the databases through the
+  running postgres), which is reliable and properly scoped to this worktree's slot DBs.
 - Real second-worktree run (vs. the same-dir slot-2 simulation) is pending a commit, since
   a new worktree checks out HEAD.
 
