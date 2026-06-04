@@ -1,6 +1,11 @@
 # Implementation Plan: Parallel Slot Port Management
 
-**Status:** Ready for implementation  
+> **⚠️ SUPERSEDED (2026-06-04)** by
+> [`parallel-worktree-shared-deps-plan.md`](parallel-worktree-shared-deps-plan.md).
+> This plan implemented a full isolated stack per slot; the project moved to a shared
+> dependency stack with per-worktree local Rails. Kept for historical context.
+
+**Status:** Superseded  
 **Date:** 2026-05-30  
 **Input documents:** `docs/specs/parallel-slot-port-management.md`, architecture review findings  
 **Supersedes:** `docs/specs/future-multi-instance-ports.md`

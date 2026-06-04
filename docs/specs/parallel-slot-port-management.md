@@ -1,6 +1,14 @@
 # Design: Parallel Slot Port Management
 
-**Status:** Draft — pending architecture review  
+> **⚠️ SUPERSEDED (2026-06-04)** by
+> [`parallel-worktree-shared-deps-plan.md`](parallel-worktree-shared-deps-plan.md).
+> This document described a *full isolated stack per slot* (separate postgres, redis,
+> and observability per `slot-N` namespace, every service port-offset). That proved too
+> heavy for a laptop. The implemented design instead **shares one dependency stack** and
+> runs only a per-worktree local Rails server. Kept for historical context — do not build
+> on the per-slot-namespace approach below.
+
+**Status:** Superseded  
 **Date:** 2026-05-30  
 **Supersedes:** `future-multi-instance-ports.md`
 
