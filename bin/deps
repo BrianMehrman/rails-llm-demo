@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+DEPS_SKAFFOLD="skaffold.deps.yaml"
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+DEPS_LOCK="${GIT_COMMON_DIR%/}/rails-llm-deps.lock"
+DEPS_WAIT_SECONDS=240
+PF_PIDS_FILE="${GIT_COMMON_DIR%/}/rails-llm-pf.pids"
+
+# ---------------------------------------------------------------------------
+# Load .env (DB creds, LLM endpoint, OTEL settings). Optional.
+# ---------------------------------------------------------------------------
+
+if [ -f .env ]; then
+  set -o allexport
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    export "$line" 2>/dev/null || true
+  done < .env
+  set +o allexport
+fi
+
+OTEL_ENABLED="${OTEL_ENABLED:-false}"
+K8S_CONTEXT="${K8S_CONTEXT:-}"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+deps_reachable() {
+  nc -z -w 2 localhost 5432 >/dev/null 2>&1 && nc -z -w 2 localhost 6379 >/dev/null 2>&1
+}
+
+port_reachable() {
+  nc -z -w 1 localhost "$1" >/dev/null 2>&1
+}
+
+# PID file: one "name:pid" entry per line.
+pf_write_pid() {
+  local name="$1" pid="$2"
+  if [ -f "$PF_PIDS_FILE" ]; then
+    grep -v "^${name}:" "$PF_PIDS_FILE" > "${PF_PIDS_FILE}.tmp" 2>/dev/null || true
+    mv "${PF_PIDS_FILE}.tmp" "$PF_PIDS_FILE"
+  fi
+  echo "${name}:${pid}" >> "$PF_PIDS_FILE"
+}
+
+pf_pid_for() {
+  local name="$1"
+  [ -f "$PF_PIDS_FILE" ] || return 1
+  grep "^${name}:" "$PF_PIDS_FILE" | cut -d: -f2
+}
+
+pf_alive() {
+  kill -0 "$1" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+cmd_status() {
+  echo "=== Shared deps ==="
+  if nc -z -w 2 localhost 5432 >/dev/null 2>&1; then
+    echo "  postgres:5432  reachable"
+  else
+    echo "  postgres:5432  UNREACHABLE"
+  fi
+  if nc -z -w 2 localhost 6379 >/dev/null 2>&1; then
+    echo "  redis:6379     reachable"
+  else
+    echo "  redis:6379     UNREACHABLE"
+  fi
+
+  echo ""
+  echo "=== Port-forwards ==="
+  if [ ! -f "$PF_PIDS_FILE" ]; then
+    echo "  (none tracked)"
+    return 0
+  fi
+
+  while IFS=: read -r name pid; do
+    [ -z "$name" ] && continue
+    if pf_alive "$pid"; then
+      echo "  ${name}: running (pid ${pid})"
+    else
+      echo "  ${name}: DEAD (pid ${pid} — stale entry)"
+    fi
+  done < "$PF_PIDS_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+SUBCOMMAND="${1:-}"
+
+case "$SUBCOMMAND" in
+  status) cmd_status ;;
+  *)
+    echo "Usage: bin/deps <start|stop|status>" >&2
+    exit 1
+    ;;
+esac
