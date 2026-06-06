@@ -59,6 +59,44 @@ pf_alive() {
   kill -0 "$1" 2>/dev/null
 }
 
+start_k8s_deps() {
+  echo "Starting shared deps (skaffold run -f ${DEPS_SKAFFOLD})..."
+  local cmd=(skaffold run -f "$DEPS_SKAFFOLD")
+  [ -n "$K8S_CONTEXT" ] && cmd+=(--kube-context "$K8S_CONTEXT")
+  "${cmd[@]}"
+}
+
+wait_for_deps() {
+  local waited=0
+  until deps_reachable; do
+    if [ "$waited" -ge "$DEPS_WAIT_SECONDS" ]; then
+      echo "ERROR: shared deps did not become reachable within ${DEPS_WAIT_SECONDS}s." >&2
+      echo "       Check: kubectl get pods -n default" >&2
+      exit 1
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
+}
+
+cmd_start() {
+  if deps_reachable; then
+    echo "Shared deps already up (postgres:5432, redis:6379)."
+  else
+    if mkdir "$DEPS_LOCK" 2>/dev/null; then
+      # shellcheck disable=SC2064
+      trap "rmdir '$DEPS_LOCK' 2>/dev/null || true" EXIT
+      deps_reachable || start_k8s_deps
+      rmdir "$DEPS_LOCK" 2>/dev/null || true
+      trap - EXIT
+    else
+      echo "Another worktree is starting shared deps; waiting..."
+    fi
+    wait_for_deps
+    echo "Shared deps are up."
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
@@ -100,6 +138,7 @@ cmd_status() {
 SUBCOMMAND="${1:-}"
 
 case "$SUBCOMMAND" in
+  start)  cmd_start ;;
   status) cmd_status ;;
   *)
     echo "Usage: bin/deps <start|stop|status>" >&2
