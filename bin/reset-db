@@ -1,50 +1,63 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reset the development database.
+# Reset THIS worktree's development databases to a clean, freshly-seeded schema.
 #
-# Use this when:
-#   - The Postgres pod fails with "initdb: error: directory exists but is not empty"
-#   - You want a clean schema + seed state during local development
-#   - After pulling migrations that conflict with your local data
+# How it works: drops and recreates the databases THROUGH the running Postgres
+# (SQL), rather than clearing Postgres's data directory.
 #
-# What it does:
-#   1. Removes the hostPath data directory used by the Kubernetes Postgres pod
-#      (/tmp/rails-llm-demo/postgres — must match charts/postgres/values.yaml).
-#      Postgres refuses to init over a non-empty directory, so this clears the slate.
-#   2. Restarts the Postgres Helm release so the pod reinitialises cleanly.
-#   3. Runs db:reset (drop + create + schema:load + db:seed) via Rails.
+# Why not clear the data directory:
+#   On Docker Desktop the Postgres data lives on a hostPath inside the cluster
+#   VM. Its filesystem cache (VirtioFS) resurrects "deleted" directory contents
+#   the moment a new pod mounts the path — so wiping the dir (from the host OR
+#   an in-cluster Job) does NOT give Postgres a clean slate; it comes back up
+#   with the old cluster. Dropping/recreating databases via SQL always works
+#   because it goes through Postgres, never the host filesystem.
 #
-# Prerequisites:
-#   - kubectl configured and pointing at your local cluster (Docker Desktop / k3d)
-#   - skaffold dev --port-forward already running (or you run it after this script)
+# Scope: only this worktree's slot-suffixed databases (chatbot_development[_sN],
+# plus _queue/_cable/_cache). Other databases on the shared Postgres (including
+# other worktrees' slots) are left untouched.
+#
+# Prerequisites: the shared dependencies are running so Postgres is reachable on
+# localhost — start them with `bin/dev` (or `skaffold run -f skaffold.deps.yaml`).
+#
+# Corrupt data directory (rare): if Postgres itself won't start ("initdb:
+# directory exists but is not empty"), the VirtioFS cache is serving a stale,
+# half-initialized dir and no in-cluster delete can fix it reliably. Recover by
+# pointing Postgres at a fresh hostPath, e.g.:
+#   skaffold delete -f skaffold.deps.yaml
+#   # bump charts/postgres/values.yaml storage.hostPath to a new dir, then:
+#   bin/dev
+# (or restart Docker Desktop to drop the cache).
 
-HOSTPATH="/tmp/rails-llm-demo/postgres"
-RELEASE="postgres"
-NAMESPACE="default"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
 
-echo "==> Removing hostPath data at ${HOSTPATH}"
-rm -rf "${HOSTPATH}"
+# Load .env (DB creds / overrides) if present.
+if [ -f .env ]; then
+  set -o allexport
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    export "$line" 2>/dev/null || true
+  done < .env
+  set +o allexport
+fi
+export DB_HOST="${DB_HOST:-localhost}" DB_PORT="${DB_PORT:-5432}"
+export DB_USERNAME="${DB_USERNAME:-postgres}" DB_PASSWORD="${DB_PASSWORD:-password}"
 
-echo "==> Restarting Postgres StatefulSet (${RELEASE})"
-# Chart labels are app.kubernetes.io/name=postgres (the chart name), instance=<release>.
-kubectl rollout restart statefulset \
-  -l "app.kubernetes.io/name=postgres,app.kubernetes.io/instance=${RELEASE}" \
-  -n "${NAMESPACE}" 2>/dev/null || \
-helm upgrade --install "${RELEASE}" charts/postgres \
-  --values charts/postgres/values.yaml \
-  --namespace "${NAMESPACE}" \
-  --wait
+# Resolve this worktree's slot so the correct (slot-suffixed) databases are reset.
+eval "$(ruby bin/use-slot --env)"
 
-echo "==> Waiting for Postgres to be ready..."
-kubectl wait pod \
-  -l "app.kubernetes.io/name=postgres,app.kubernetes.io/instance=${RELEASE}" \
-  -n "${NAMESPACE}" \
-  --for=condition=Ready \
-  --timeout=60s
+# Fail early with a clear message if Postgres isn't reachable.
+if ! nc -z -w 3 "$DB_HOST" "$DB_PORT" >/dev/null 2>&1; then
+  echo "ERROR: Postgres is not reachable at ${DB_HOST}:${DB_PORT}." >&2
+  echo "       Start the shared deps first: bin/dev (or skaffold run -f skaffold.deps.yaml)." >&2
+  exit 1
+fi
 
-echo "==> Resetting Rails database (drop + create + schema:load + seed)"
-bin/rails db:reset
+echo "==> Resetting databases for slot ${SLOT:-1} (drop + recreate + load schema + seed)"
+bin/rails db:drop db:prepare db:seed
 
 echo ""
-echo "Done. Database is reset and ready."
+echo "Done. This worktree's databases are reset and seeded."

@@ -58,5 +58,12 @@ cat > "$claude_dir/settings.local.json" <<'JSON'
 }
 JSON
 
+# Assign this worktree a parallel-dev slot. Auto-assigned from a shared registry
+# and idempotent, so this is safe to run non-interactively (e.g. by an agent).
+# The worktree then just runs `bin/dev` to start its Rails server.
+echo "Assigning parallel-dev slot for ${worktree_path}..." >&2
+(cd "$worktree_path" && ruby bin/use-slot) >&2 || \
+  echo "WARNING: bin/use-slot failed — run it manually in the worktree." >&2
+
 # Echo the path — required by the WorktreeCreate hook contract
 echo "$worktree_path"

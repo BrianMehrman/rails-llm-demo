@@ -47,3 +47,52 @@ Decisions made deliberately. Check here before "improving" something — it may 
 **Why not removed:** Low priority; removal requires care to avoid breaking the scaffold-generated test fixtures.
 
 **What to do instead:** Do not build on the Posts resource. Do not copy patterns from `PostsController` or the Posts views — they are Rails scaffold defaults, not project conventions. The canonical examples for this project are `ChatsController`, `MessagesController`, `LlmResponseJob`, and `LlmClient`.
+
+---
+
+## Parallel Worktrees: Shared Deps + Per-Worktree Local Rails
+
+**Decision:** Multiple git worktrees share ONE dependency stack (postgres, redis,
+observability) and each runs only its own local Rails server on a per-worktree port,
+isolated by its own slot-suffixed databases. A worktree's "slot" is a small stable
+integer assigned first-come from a shared registry. The single command `bin/dev`
+resolves the slot, ensures the shared deps are up (starting them once if needed),
+prepares this worktree's databases, and runs Rails.
+
+**Why:** Running a full isolated stack per worktree (separate postgres + redis +
+observability per namespace) is too heavy for a laptop and wasteful — the deps are
+identical across worktrees. Sharing them means only the Rails port and database names
+vary per worktree. This supersedes the earlier per-slot-full-stack design (every
+service port-offset into its own namespace).
+
+**Daily workflow:**
+1. In any worktree, run `bin/dev`. First run assigns a slot, brings up the shared deps
+   if they aren't already running, creates this worktree's databases, and starts Rails.
+2. Start `bin/dev` in another worktree — it reuses the shared deps and runs its own
+   Rails on a different port. `bin/use-slot --list` shows the worktree → slot map.
+3. `bin/setup-worktree` assigns a slot automatically when a worktree is created.
+
+**How it works:**
+- **Slot registry:** `.git/<common-dir>/rails-llm-slots.json` maps worktree path → slot.
+  It lives in the shared git common dir so every worktree sees the same data; it is
+  inside `.git`, so it is never committed. Assignment is first-come (lowest free slot);
+  `bin/use-slot --release` frees one.
+- **Ports:** only Rails varies — slot 1 → `3000`, slot 2 → `3010`, slot 3 → `3020`…
+  Shared deps keep fixed localhost ports (postgres `5432`, redis `6379`, grafana `3001`,
+  prometheus `9090`).
+- **Databases:** same postgres, slot-suffixed names. Slot 1 keeps the original
+  `chatbot_development` (+ `_queue`/`_cable`/`_cache`) for backward compatibility; slot N
+  gets `chatbot_development_sN…`. Injected via `DATABASE_URL`/`QUEUE_…`/`CABLE_…`/
+  `CACHE_DATABASE_URL`, so `config/database.yml` is unchanged.
+- **Deps reachability:** `skaffold.deps.yaml` deploys the deps once (`skaffold run`) and
+  exposes their services as LoadBalancer, so docker-desktop binds them to `localhost`
+  with no `kubectl port-forward` process to babysit.
+
+**Constraints:**
+- `skaffold.deps.yaml` is the dev dependency stack (no rails-app — Rails runs locally).
+  The full in-cluster deploy (`skaffold.yaml`, incl. rails-app) is a separate path and
+  is left unchanged.
+- The shared postgres password (`charts/postgres/values.yaml` → `auth.password`) must
+  match the DB password used to build connection URLs (`DB_PASSWORD`, default `password`).
+
+**See also:** `docs/specs/parallel-worktree-shared-deps-plan.md` for the full design.

@@ -1,0 +1,92 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# bin/use-slot — resolve this git worktree's slot for parallel local development.
+#
+# A "slot" is a small stable integer assigned per worktree (first-come) and
+# recorded in a registry shared by every worktree of the repo. It determines
+# this worktree's local Rails port and its (slot-suffixed) database names, so
+# multiple worktrees can run their own Rails server against ONE shared set of
+# dependencies (postgres, redis, observability) without colliding.
+#
+# Usage:
+#   bin/use-slot              # resolve/assign and print a human summary
+#   bin/use-slot --print      # print just the slot number (for scripts)
+#   bin/use-slot --env        # print sourceable KEY=VALUE lines (SLOT, RAILS_PORT, *_DATABASE_URL)
+#   bin/use-slot --list       # list every worktree -> slot
+#   bin/use-slot --release    # free this worktree's slot
+#
+# Database connection details default to the shared postgres deployed by
+# skaffold.deps.yaml and can be overridden via DB_HOST/DB_PORT/DB_USERNAME/
+# DB_PASSWORD in the environment.
+
+require_relative "../lib/slot_registry"
+require_relative "../lib/slot_config"
+
+def git(*args)
+  out = IO.popen([ "git", *args ], err: File::NULL, &:read).to_s.strip
+  out.empty? ? nil : out
+end
+
+git_common_dir = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+worktree_root  = git("rev-parse", "--show-toplevel")
+
+unless git_common_dir && worktree_root
+  warn "ERROR: not inside a git repository (bin/use-slot needs git worktree info)."
+  exit 1
+end
+
+registry_path = File.join(git_common_dir, SlotRegistry::DEFAULT_FILENAME)
+registry = SlotRegistry.new(registry_path)
+
+mode = ARGV.find { |a| a.start_with?("--") } || "--summary"
+
+# Shared-deps connection defaults (overridable via env).
+db_host     = ENV.fetch("DB_HOST", "localhost")
+db_port     = ENV.fetch("DB_PORT", "5432")
+db_username = ENV.fetch("DB_USERNAME", "postgres")
+db_password = ENV.fetch("DB_PASSWORD", "password")
+
+case mode
+when "--release"
+  freed = registry.release(worktree_root)
+  if freed
+    puts "Released slot #{freed} for #{worktree_root}."
+  else
+    puts "No slot was assigned to #{worktree_root}."
+  end
+
+when "--list"
+  entries = registry.all
+  if entries.empty?
+    puts "No slots assigned yet."
+  else
+    width = entries.values.map { |s| s.to_s.length }.max
+    entries.sort_by { |_path, slot| slot }.each do |path, slot|
+      puts "  slot #{slot.to_s.rjust(width)}  ->  #{path}"
+    end
+  end
+
+when "--print"
+  puts registry.assign(worktree_root)
+
+when "--env"
+  # Shell-quoted `export` lines so values containing URL query separators (&)
+  # are safe to `eval`/`source`. Slot config values never contain single quotes.
+  slot = registry.assign(worktree_root)
+  env = SlotConfig.env(slot, host: db_host, port: db_port, username: db_username, password: db_password)
+  env.each { |k, v| puts "export #{k}='#{v}'" }
+
+else # --summary
+  slot = registry.assign(worktree_root)
+  port = SlotConfig.rails_port(slot)
+  names = SlotConfig.database_names(slot)
+
+  puts "Worktree : #{worktree_root}"
+  puts "Slot     : #{slot}"
+  puts "Rails    : http://localhost:#{port}"
+  puts "Databases: #{names[:primary]} (+ _queue / _cable / _cache)"
+  puts "Postgres : #{db_username}@#{db_host}:#{db_port} (shared)"
+  puts ""
+  puts "Start this worktree:  bin/dev"
+end

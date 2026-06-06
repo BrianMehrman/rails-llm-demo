@@ -138,13 +138,24 @@ bin/bundler-audit                     # gem vulnerability scan
 ## Important Commands
 
 ```bash
-# Local dev (two terminals)
-skaffold dev                          # starts Postgres + Redis, forwards localhost:5432 / 6379
-bin/rails server                      # http://localhost:3000
+# Local dev — ONE command per worktree (shared deps in k8s + Rails run locally)
+bin/dev                               # resolve slot, ensure shared deps up, db:prepare, run Rails
+
+# Parallel worktrees: each worktree runs its own Rails on its own port against
+# ONE shared dependency stack (postgres, redis, observability). To start a new
+# instance, create a worktree and run bin/dev in it — that's all:
+git worktree add ../my-worktree -b my-branch
+cd ../my-worktree && bin/dev          # auto-assigns the next slot (3000, 3010, 3020, …) + its own DBs
+bin/use-slot --list                   # show worktree -> slot assignments
+bin/use-slot --release                # free this worktree's slot (before removing the worktree)
+# Design: docs/specs/parallel-worktree-shared-deps-plan.md
+
+# Full in-cluster deploy (also builds + runs rails-app inside Kubernetes)
+skaffold dev                          # deploys the whole stack incl. the app; opens :3000
 
 # Database
-bin/rails db:setup                    # first-time: create + migrate all three databases
-bin/reset-db                          # wipe Kubernetes hostPath volume + db:reset
+bin/rails db:setup                    # first-time: create + migrate all databases (bin/dev does this too)
+bin/reset-db                          # drop + recreate THIS worktree's databases via SQL
 
 # Assets / JS
 bin/importmap pin <package>           # add a JS package via importmap
