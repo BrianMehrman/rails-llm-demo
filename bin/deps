@@ -59,6 +59,28 @@ pf_alive() {
   kill -0 "$1" 2>/dev/null
 }
 
+start_port_forward() {
+  local name="$1" svc="$2" port="$3"
+
+  if port_reachable "$port"; then
+    echo "  ${name}: already reachable on :${port}"
+    return 0
+  fi
+
+  local existing_pid
+  existing_pid="$(pf_pid_for "$name")" || true
+  if [ -n "$existing_pid" ] && pf_alive "$existing_pid"; then
+    echo "  ${name}: port-forward already running (pid ${existing_pid})"
+    return 0
+  fi
+
+  echo "  ${name}: starting kubectl port-forward ${svc} ${port}:${port}..."
+  kubectl port-forward "$svc" "${port}:${port}" >/dev/null 2>&1 &
+  local pid=$!
+  pf_write_pid "$name" "$pid"
+  echo "  ${name}: started (pid ${pid})"
+}
+
 start_k8s_deps() {
   echo "Starting shared deps (skaffold run -f ${DEPS_SKAFFOLD})..."
   local cmd=(skaffold run -f "$DEPS_SKAFFOLD")
@@ -95,6 +117,32 @@ cmd_start() {
     wait_for_deps
     echo "Shared deps are up."
   fi
+
+  # Start port-forwards when tracing is enabled
+  if [ "$OTEL_ENABLED" = "true" ]; then
+    echo "OTEL_ENABLED=true — ensuring OTLP port-forward..."
+    start_port_forward "otlp" "svc/jaeger-collector" "4318"
+  fi
+}
+
+cmd_stop() {
+  if [ ! -f "$PF_PIDS_FILE" ]; then
+    echo "No port-forwards tracked (${PF_PIDS_FILE} not found)."
+    return 0
+  fi
+
+  while IFS=: read -r name pid; do
+    [ -z "$name" ] && continue
+    if pf_alive "$pid"; then
+      echo "Stopping ${name} (pid ${pid})..."
+      kill "$pid" 2>/dev/null || true
+    else
+      echo "  ${name} (pid ${pid}): already stopped (stale entry)"
+    fi
+  done < "$PF_PIDS_FILE"
+
+  rm -f "$PF_PIDS_FILE"
+  echo "Done."
 }
 
 # ---------------------------------------------------------------------------
@@ -139,6 +187,7 @@ SUBCOMMAND="${1:-}"
 
 case "$SUBCOMMAND" in
   start)  cmd_start ;;
+  stop)   cmd_stop ;;
   status) cmd_status ;;
   *)
     echo "Usage: bin/deps <start|stop|status>" >&2
