@@ -26,33 +26,64 @@ ollama serve   # listens on localhost:11434
 
 ## Quick start
 
+There are two ways to run the stack locally.
+
+### Local development (recommended) — `bin/dev`
+
 ```bash
 git clone <repo-url> && cd rails-llm-demo
-skaffold dev      # builds the image, deploys everything, forwards ports
+bin/dev
 ```
 
-`skaffold dev` brings up Postgres, Redis, the Rails app, and the full observability stack. Database migrations run **automatically** when the Rails container boots (`bin/docker-entrypoint` runs `db:prepare`) — there is no manual `db:setup` step. When the app is ready, open <http://localhost:3000>.
+`bin/dev` is a single command. It brings up **one shared dependency stack** (Postgres, Redis, and the observability tooling) in Kubernetes, then runs the Rails server **locally** against it. On first run it assigns this worktree a "slot", creates its databases, and starts Rails. Open <http://localhost:3000>.
 
-The in-cluster app reaches Ollama on your host via `host.docker.internal:11434` (configured in `charts/rails-app/values.yaml`). On Docker Desktop this works out of the box; on Linux/k3d you may need to adjust the host address.
+The local Rails server reaches Ollama directly at `localhost:11434` (via `OPENAI_API_BASE`).
+
+#### Running multiple worktrees in parallel
+
+Each worktree gets its own Rails port and its own databases while sharing the one dependency stack, so you can run several branches at once:
+
+```bash
+git worktree add ../feature-x -b feature-x
+cd ../feature-x && bin/dev        # auto-assigns the next slot: Rails on :3010 with its own databases
+```
+
+Slots are assigned first-come (slot 1 → `:3000`, slot 2 → `:3010`, …) and recorded in a registry shared across worktrees. `bin/use-slot --list` shows the assignments; `bin/use-slot --release` frees one before you remove a worktree. See **[docs/specs/parallel-worktree-shared-deps-plan.md](docs/specs/parallel-worktree-shared-deps-plan.md)**.
+
+### Full in-cluster deploy — `skaffold dev`
+
+```bash
+skaffold dev      # builds the image, deploys EVERYTHING including the Rails app, forwards all ports
+```
+
+This deploys the Rails app into Kubernetes too (not just the dependencies) and forwards every port below. Migrations run **automatically** when the container boots (`bin/docker-entrypoint` runs `db:prepare`). Use it to test the containerized app or a production-like topology. The in-cluster app reaches Ollama via `host.docker.internal:11434` (configured in `charts/rails-app/values.yaml`).
 
 ## Ports
 
-The stack occupies these fixed ports. Check for conflicts before starting — running multiple instances on one machine is not yet supported (see `docs/specs/future-multi-instance-ports.md`).
+With `bin/dev`, only the **Rails port varies per worktree** (slot 1 → `3000`, slot 2 → `3010`, …); the shared dependencies stay on fixed localhost ports:
 
-| Port | Service |
-|---|---|
-| 3000 | Rails app |
-| 3001 | Grafana |
-| 9090 | Prometheus |
-| 16686 | Jaeger UI |
-| 4318 | Jaeger OTLP collector (HTTP) |
-| 3100 | Loki |
-| 5432 | Postgres |
-| 6379 | Redis |
+| Port | Service | Exposed by |
+|---|---|---|
+| 3000 (+ slot offset) | Rails app | both |
+| 3001 | Grafana (view Loki logs & Jaeger traces here) | both |
+| 9090 | Prometheus | both |
+| 5432 | Postgres | both |
+| 6379 | Redis | both |
+| 16686 | Jaeger UI | `skaffold dev` only |
+| 4318 | Jaeger OTLP collector (HTTP) | `skaffold dev` only |
+| 3100 | Loki | `skaffold dev` only |
+
+With `bin/dev`, Loki and Jaeger run in-cluster and are viewed through Grafana's pre-provisioned data sources; their direct ports (and the OTLP collector) are forwarded only by the `skaffold dev` path.
 
 ## Generate signal
 
-Run these against a running stack to populate the dashboards. Because Prometheus scrapes the in-cluster pod and Fluent Bit collects pod logs, the rake tasks must run **inside the cluster**:
+> **Use the `skaffold dev` (in-cluster) path for the observability demo.** Prometheus
+> scrapes the in-cluster pod and Fluent Bit collects pod logs, so full metrics + logs only
+> flow when the Rails app runs in Kubernetes. The local `bin/dev` path is for app
+> development and parallel worktrees; a locally-run Rails server is not scraped/collected by
+> the in-cluster tooling.
+
+Run these against the in-cluster app to populate the dashboards:
 
 ```bash
 kubectl exec -it deploy/rails-app -- bin/rails demo:seed       # historical chat data
