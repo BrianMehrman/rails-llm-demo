@@ -5,21 +5,17 @@ set -euo pipefail
 #
 # One command, non-interactive. It:
 #   1. Resolves this worktree's slot (stable per-worktree port + database names).
-#   2. Ensures the SHARED dependency stack (postgres, redis, observability) is up,
-#      starting it once if needed (skaffold run -f skaffold.deps.yaml).
+#   2. Ensures the SHARED dependency stack is up via bin/deps start.
 #   3. Creates/migrates this worktree's databases (idempotent db:prepare).
 #   4. Runs Rails locally on this worktree's port against the shared deps.
 #
 # Multiple worktrees can run bin/dev concurrently: they share one set of
 # dependencies and differ only in their Rails port and database names.
+#
+# To manage deps independently: bin/deps start|stop|status
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-
-DEPS_SKAFFOLD="skaffold.deps.yaml"
-GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
-DEPS_LOCK="${GIT_COMMON_DIR%/}/rails-llm-deps.lock"
-DEPS_WAIT_SECONDS=240
 
 # ---------------------------------------------------------------------------
 # Load .env (DB creds, LLM endpoint, OTEL settings). Optional.
@@ -44,59 +40,12 @@ eval "$(ruby bin/use-slot --env)"
 
 SLOT="${SLOT:-1}"
 RAILS_PORT="${RAILS_PORT:-3000}"
-K8S_CONTEXT="${K8S_CONTEXT:-}"
 
 # ---------------------------------------------------------------------------
-# Shared dependency stack
+# Shared dependency stack (delegates to bin/deps)
 # ---------------------------------------------------------------------------
 
-deps_reachable() {
-  nc -z -w 2 localhost 5432 >/dev/null 2>&1 && nc -z -w 2 localhost 6379 >/dev/null 2>&1
-}
-
-wait_for_deps() {
-  local waited=0
-  until deps_reachable; do
-    if [ "$waited" -ge "$DEPS_WAIT_SECONDS" ]; then
-      echo "ERROR: shared deps did not become reachable within ${DEPS_WAIT_SECONDS}s." >&2
-      echo "       Check: kubectl get pods -n default" >&2
-      exit 1
-    fi
-    sleep 3
-    waited=$((waited + 3))
-  done
-}
-
-start_deps() {
-  echo "Starting shared deps (skaffold run -f ${DEPS_SKAFFOLD})..."
-  local cmd=(skaffold run -f "$DEPS_SKAFFOLD")
-  [ -n "$K8S_CONTEXT" ] && cmd+=(--kube-context "$K8S_CONTEXT")
-  "${cmd[@]}"
-}
-
-ensure_deps() {
-  if deps_reachable; then
-    echo "Shared deps already up (postgres:5432, redis:6379)."
-    return 0
-  fi
-
-  # mkdir is atomic — first worktree wins the lock and starts deps; others wait.
-  # (macOS has no flock(1), so we use a lock directory instead.)
-  if mkdir "$DEPS_LOCK" 2>/dev/null; then
-    # shellcheck disable=SC2064
-    trap "rmdir '$DEPS_LOCK' 2>/dev/null || true" EXIT
-    deps_reachable || start_deps
-    rmdir "$DEPS_LOCK" 2>/dev/null || true
-    trap - EXIT
-  else
-    echo "Another worktree is starting shared deps; waiting..."
-  fi
-
-  wait_for_deps
-  echo "Shared deps are up."
-}
-
-ensure_deps
+bin/deps start
 
 # ---------------------------------------------------------------------------
 # Per-worktree databases (idempotent: creates + migrates if missing).
