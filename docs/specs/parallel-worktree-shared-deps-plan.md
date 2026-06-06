@@ -44,15 +44,18 @@ port, isolate the database, and launch Rails.
   NodePort for any service that won't bind cleanly.
 - Fixed localhost ports (shared by all worktrees):
 
-  | Service     | Port  |
-  |-------------|-------|
-  | postgres    | 5432  |
-  | redis       | 6379  |
-  | grafana     | 3001  |
-  | prometheus  | 9090  |
-  | loki        | 3100  |
-  | jaeger UI   | 16686 |
-  | OTLP (jaeger-collector) | 4318 |
+  | Service     | Port  | Exposed via |
+  |-------------|-------|-------------|
+  | postgres    | 5432  | LoadBalancer |
+  | redis       | 6379  | LoadBalancer |
+  | grafana     | 3001  | LoadBalancer |
+  | prometheus  | 9090  | LoadBalancer |
+  | loki        | 3100  | `kubectl port-forward` |
+  | jaeger UI   | 16686 | `kubectl port-forward` |
+  | OTLP (jaeger-collector) | 4318 | `kubectl port-forward` |
+
+  > Loki, Jaeger, and OTLP are not exposed via LoadBalancer in `skaffold.deps.yaml`.
+  > Reach them with `kubectl port-forward svc/<name> <port>` when needed.
 
 - Deployed via a new **`skaffold.deps.yaml`** (deps-only). The original `skaffold.yaml`
   (full in-cluster deploy incl. rails-app) is left untouched for the in-cluster path.

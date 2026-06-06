@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "uri"
+
 # SlotConfig derives a worktree's runtime configuration from its slot number:
 # the local Rails port and the (slot-suffixed) database names / connection URLs.
 #
@@ -35,7 +37,7 @@ module SlotConfig
 
   # { primary:, queue:, cable:, cache: } => postgresql URLs.
   def database_urls(slot, host:, port:, username:, password:)
-    authority = "#{username}:#{password}@#{host}:#{port}"
+    authority = "#{URI.encode_www_form_component(username)}:#{URI.encode_www_form_component(password)}@#{host}:#{port}"
     database_names(slot).transform_values do |db|
       "postgresql://#{authority}/#{db}?#{DB_QUERY}"
     end
