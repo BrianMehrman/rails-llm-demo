@@ -52,7 +52,7 @@ pf_write_pid() {
 pf_pid_for() {
   local name="$1"
   [ -f "$PF_PIDS_FILE" ] || return 1
-  grep "^${name}:" "$PF_PIDS_FILE" | cut -d: -f2
+  grep "^${name}:" "$PF_PIDS_FILE" | cut -d: -f2 || true
 }
 
 pf_alive() {
